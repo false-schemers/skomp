@@ -1,0 +1,23 @@
+;---------------------------------------------------------------------------------------------
+; skomp compile driver: the Scheme side of the pipeline.
+;---------------------------------------------------------------------------------------------
+;
+;   skint -q skomp.ssc INPUT.scm OUTPUT.mvs [OPTIMIZE]
+;
+; skomp runs this with its own skint and with SKINT_LIBDIRS pointing at the
+; directory above, which holds (skint compile) and nothing else of a library
+; tree.  Both paths arrive exactly as the user wrote them, so the working
+; directory decides what they mean, as it would for any other tool.
+
+(import (scheme base) (scheme process-context) (skint compile))
+
+(let ([args (cdr (command-line))])
+  (when (< (length args) 2)
+    (display "skomp.ssc: expected INPUT OUTPUT [OPTIMIZE]"
+             (current-error-port))
+    (newline (current-error-port))
+    (exit 1))
+  (if (null? (cddr args))
+      (compile-program (car args) (cadr args))
+      (compile-program (car args) (cadr args)
+                       cp-optimize (string->number (caddr args)))))

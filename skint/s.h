@@ -1,0 +1,243 @@
+/* s.h -- system-dependent stuff */
+
+/* Every translation unit must include this file before n.h and i.h: it selects
+ * the feature-test macros, and those are only honored before the C library
+ * headers are read.  n.h and i.h check for this. */
+#define SKINT_S_H_SEEN 1
+
+#if defined(__GNUC__) && defined(__linux)
+  #ifdef _FEATURES_H
+    #warning too late to select features
+  #endif
+  #if !defined( _GNU_SOURCE )
+    #define _GNU_SOURCE
+  #endif
+  #define _ISOC99_SOURCE
+  #define _XOPEN_SOURCE 500
+  #if defined( __INTERIX )
+    #define _XOPEN_SOURCE_EXTENDED 1
+  #endif
+#endif
+
+/* this is for MS headers; shouldn't affect others */
+#define _CRT_SECURE_NO_WARNINGS 1
+  
+#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
+#include <string.h>
+#include <stdio.h>
+#include <wchar.h>
+#include <assert.h>
+#include <locale.h>
+#include <stdarg.h>
+#include <math.h> /* zero_is_neg below tests for signbit, which lives here */
+
+#if defined(_MSC_VER)
+#ifdef _POSIX_
+#undef _POSIX_
+#endif
+#if (_WIN32_WINNT < 0x0500)
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0500
+#endif
+#include <fcntl.h>
+#include <io.h>
+#include <share.h> /* for _SH_DENYNO */
+#include <direct.h>
+#include <sys/types.h>
+#include <process.h> /* for getpid */
+#include <sys/stat.h> /* for _S_IREAD|_S_IWRITE */
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#if _MSC_VER >= 1600
+#include <crtversion.h>
+#endif
+#if defined(_VC_CRT_MAJOR_VERSION) && (_VC_CRT_MAJOR_VERSION >= 14)
+void __cdecl __acrt_errno_map_os_error(unsigned long const oserrno);
+#define _dosmaperr(oserrno) __acrt_errno_map_os_error(oserrno)
+#else
+_CRTIMP void __cdecl _dosmaperr(unsigned long);
+#endif
+#define getcwd _getcwd
+#define chdir _chdir
+#define mkdir(d,m) _mkdir(d)
+#define rmdir _rmdir
+#define stat(a,b) _stat(a,b)
+#define isatty _isatty
+#define fileno _fileno
+#define setbmode(fp) _setmode(_fileno(fp),_O_BINARY)
+typedef struct _stat stat_t;
+#define S_ISDIR(m) (((m) & _S_IFMT) == _S_IFDIR)
+#define S_ISREG(m) (((m) & _S_IFMT) == _S_IFREG)
+#ifdef _DEBUG
+#include <crtdbg.h>
+#endif
+#ifndef EEXIST 
+#include <errno.h>
+#endif
+#elif defined(__GNUC__) && defined(__APPLE__) 
+#include <mach-o/dyld.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
+#include <termios.h>
+#include <unistd.h>
+#include <dlfcn.h>
+#include <dirent.h>
+#include <fcntl.h>
+#include <signal.h>
+#define setbmode(fp) /* nothing */
+typedef struct stat stat_t; 
+#elif defined(__GNUC__) && defined(__linux)
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
+#include <termios.h>
+#include <unistd.h>
+#include <dlfcn.h>
+#include <dirent.h>
+#include <fcntl.h>
+#define setbmode(fp) /* nothing */
+#ifdef _LFS64_LARGEFILE
+#define stat(a,b) stat64(a,b)
+typedef struct stat64 stat_t; 
+#else
+typedef struct stat stat_t; 
+#endif
+#elif defined(__GNUC__) && (defined(_WIN32) || defined(__INTERIX))
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
+#include <termios.h>
+#include <unistd.h>
+#include <dlfcn.h>
+#include <dirent.h>
+#include <fcntl.h>
+#define setbmode(fp) /* nothing */
+#ifdef _LFS64_LARGEFILE
+#define stat(a,b) stat64(a,b)
+typedef struct stat64 stat_t; 
+#else
+typedef struct stat stat_t; 
+#endif
+#if defined(__INTERIX)
+#include <signal.h>
+#include <strings.h>
+#endif
+#elif defined(__SVR4) && defined(__sun)
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/ioctl.h>
+#include <sys/time.h>
+#include <termios.h>
+#include <unistd.h>
+#include <dirent.h>
+#include <fcntl.h>
+#define setbmode(fp) /* nothing */
+#ifdef _LFS64_LARGEFILE
+#define stat(a,b) stat64(a,b)
+typedef struct stat64 stat_t; 
+#else
+typedef struct stat stat_t; 
+#endif
+#include <libgen.h>
+#include <signal.h>
+#else
+#error "s.h: add your platform here" 
+#endif
+
+
+/* file offsets, for the position of a binary port; see notes.md [9] */
+#if defined(_MSC_VER) && (_MSC_VER >= 1400)
+typedef __int64 fileoff_t;
+#define ftelloff(fp) _ftelli64(fp)
+#define fseekoff(fp, off, org) _fseeki64(fp, off, org)
+#elif defined(__MINGW32__)
+typedef __int64 fileoff_t;
+#define ftelloff(fp) _ftelli64(fp)
+#define fseekoff(fp, off, org) _fseeki64(fp, off, org)
+#elif defined(_POSIX_VERSION) && (_POSIX_VERSION >= 200112L)
+typedef off_t fileoff_t;
+#define ftelloff(fp) ftello(fp)
+#define fseekoff(fp, off, org) fseeko(fp, off, org)
+#else /* c89 only */
+typedef long fileoff_t;
+#define ftelloff(fp) ftell(fp)
+#define fseekoff(fp, off, org) fseek(fp, off, org)
+#endif
+
+/* the largest value a fileoff_t can hold, as an int64_t */
+#define FILEOFF_IMAX ((int64_t)((((uint64_t)1) << (sizeof(fileoff_t)*8 - 1)) - 1))
+
+
+/* z is zero, but is it negative zero? */
+#if  (defined(_MSC_VER) && _MSC_VER >= 1800) || defined(signbit)
+#  define zero_is_neg(z) signbit(z)
+#else
+#  define zero_is_neg(z) (1.0/(z) < 0.0)
+#endif
+
+#if !defined(static_inline) 
+#  if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 199901L
+#    define static_inline static inline
+#  elif defined(_MSC_VER) || defined(__GNUC__)
+#    define static_inline static __inline
+#  else
+#    define static_inline static
+#  endif
+#endif
+
+#ifndef __has_builtin
+#  define __has_builtin(x) 0
+#endif
+
+/* ieee_fminimum / ieee_fmaximum */
+
+/* Detect availability of fminimum/fmaximum in the C library;
+ * do not treat -std=c23 as proof of a C23 libm */
+#if defined(__GLIBC_PREREQ)
+#  if __GLIBC_PREREQ(2, 38) && (defined(_GNU_SOURCE) || defined(_ISOC23_SOURCE) \
+        || defined(_ISOC2X_SOURCE) \
+        || (defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L))
+#    define SK_HAS_FMINIMUM_LIB
+#  endif
+#endif
+
+#if __has_builtin(__builtin_fminimum) && __has_builtin(__builtin_fmaximum) \
+    && defined(SK_HAS_FMINIMUM_LIB)
+#  define ieee_fminimum(x, y) __builtin_fminimum((x), (y))
+#  define ieee_fmaximum(x, y) __builtin_fmaximum((x), (y))
+
+#elif defined(SK_HAS_FMINIMUM_LIB)
+#  define ieee_fminimum(x, y) fminimum((x), (y))
+#  define ieee_fmaximum(x, y) fmaximum((x), (y))
+
+#else
+
+static_inline double ieee_fminimum(double x, double y) {
+  return (x != x) ? x * 1.0 : (y != y) ? y * 1.0 :
+         (x < y)  ? x : (y < x)  ? y :
+         (x != 0.0) ? x :
+         (zero_is_neg(x) || zero_is_neg(y)) ? -0.0 : 0.0;
+}
+
+static_inline double ieee_fmaximum(double x, double y) {
+  return (x != x) ? x * 1.0 : (y != y) ? y * 1.0 :
+         (x > y)  ? x : (y > x)  ? y :
+         (x != 0.0) ? x :
+         (zero_is_neg(x) && zero_is_neg(y)) ? -0.0 : 0.0;
+}
+
+#endif
+
+#ifdef SK_HAS_FMINIMUM_LIB
+#  undef SK_HAS_FMINIMUM_LIB
+#endif

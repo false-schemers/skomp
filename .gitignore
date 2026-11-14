@@ -53,3 +53,13 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# skomp build products
+/skomp
+/skomp.1
+/skomp-home/
+/config.mk
+pre/.import-tmp
+
+# scratch
+/work/

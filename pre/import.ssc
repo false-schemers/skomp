@@ -1,0 +1,316 @@
+;---------------------------------------------------------------------------------------------
+; skomp source importer: brings in the files skomp is built from, and only those,
+; from the sister distributives.
+;---------------------------------------------------------------------------------------------
+;
+;   skint pre/import.ssc [SISTERS-DIR]
+;
+; Run it from the repository root.  SISTERS-DIR holds the sister checkouts and
+; defaults to the repository's parent, so the usual layout is
+;
+;   work/skint   work/marv   work/WCPL/wcpl   work/skomp
+;
+; Nothing in this repository links to a sister checkout or to a branch of one:
+; the files are copied in and committed here.  pre/SOURCES.txt records what was
+; copied and from which commit; pre/README.md records the versions this import
+; expects.
+;
+; Two of the file lists are DERIVED rather than written out, so they cannot fall
+; behind the compiler: the cups-*.scm units come from the (include ...) forms in
+; compile.sld, and the clib/ tree comes from *shadow-library-names* in
+; cups-front.scm.  A shadow name whose clib file is missing stops the import --
+; that is the invariant skomp's packaging rests on, since skomp ships clib/ and
+; no other part of the host's library tree.
+
+(import (only (skint hidden)
+  path-directory path-strip-directory dir-add-separator
+  read-file-sexps %system))
+
+;;; --- small utilities ------------------------------------------------------
+
+(define *windows?* (and (memq 'windows (features)) #t))
+
+(define (die . args)
+  (display "import: " (current-error-port))
+  (for-each (lambda (a)
+              (if (string? a)
+                  (display a (current-error-port))
+                  (write a (current-error-port)))
+              (display " " (current-error-port)))
+            args)
+  (newline (current-error-port))
+  (exit 1))
+
+(define (say . args)
+  (for-each (lambda (a) (if (string? a) (display a) (write a))) args)
+  (newline))
+
+(define (path-join a b)
+  (cond [(string=? a "") b]
+        [(string=? b "") a]
+        [else (string-append (dir-add-separator a) b)]))
+
+;; Copy a file byte for byte: these are source files of three other projects
+;; and must arrive exactly as they are, line endings included.
+(define (copy-file! from to)
+  (let* ([in (open-binary-input-file from)]
+         [bv (read-bytevector 100000000 in)])
+    (close-port in)
+    (let ([out (open-binary-output-file to)])
+      (unless (eof-object? bv) (write-bytevector bv out))
+      (close-port out))
+    (if (eof-object? bv) 0 (bytevector-length bv))))
+
+;; path-directory answers a path WITH its trailing separator, which a shell
+;; wants gone: cmd reads a trailing backslash before a closing quote as an
+;; escape, and the test below would misfire.
+(define (trim-separator dir)
+  (let loop ([n (string-length dir)])
+    (cond [(<= n 1) dir]
+          [(memv (string-ref dir (- n 1)) '(#\/ #\\)) (loop (- n 1))]
+          [else (substring dir 0 n)])))
+
+;; skint has no mkdir, so the shell provides one.  Both forms are idempotent,
+;; and both create intermediate components, so an existing directory is not an
+;; error and a missing one is reported by the file write that follows.
+(define (ensure-directory! dir)
+  (let ([d (trim-separator dir)])
+    (unless (string=? d "")
+      (%system (if *windows?*
+                   (string-append "if not exist \"" d "\" mkdir \"" d "\"")
+                   (string-append "mkdir -p \"" d "\""))))))
+
+;; One line of a command's output, or #f.  There is no pipe to read from, so it
+;; goes through a temporary file.
+(define (capture cmd)
+  (let* ([tmp "pre/.import-tmp"]
+         [rc (%system (string-append cmd " > " tmp " 2>&1"))]
+         [line (if (file-exists? tmp)
+                   (call-with-input-file tmp (lambda (p) (read-line p)))
+                   (eof-object))])
+    (when (file-exists? tmp) (delete-file tmp))
+    (and (eqv? rc 0) (string? line) (positive? (string-length line)) line)))
+
+(define (git-field dir args)
+  (or (capture (string-append "git -C \"" dir "\" " args)) "unknown"))
+
+(define (git-dirty? dir)
+  (let ([tmp "pre/.import-tmp"])
+    (%system (string-append "git -C \"" dir "\" status --porcelain > "
+                            tmp " 2>&1"))
+    (let ([n (if (file-exists? tmp)
+                 (call-with-input-file tmp
+                   (lambda (p)
+                     (let loop ([k 0])
+                       (if (eof-object? (read-line p)) k (loop (+ k 1))))))
+                 0)])
+      (when (file-exists? tmp) (delete-file tmp))
+      (positive? n))))
+
+(define (contains? s sub)
+  (let ([n (string-length s)] [m (string-length sub)])
+    (let loop ([i 0])
+      (cond [(> (+ i m) n) #f]
+            [(string=? (substring s i (+ i m)) sub) #t]
+            [else (loop (+ i 1))]))))
+
+;;; --- the derivations ------------------------------------------------------
+
+(define (find-quoted-definition name forms what)
+  (let loop ([fs forms])
+    (cond [(null? fs) (die "cannot find" name "in" what)]
+          [(and (pair? (car fs)) (eq? (caar fs) 'define)
+                (pair? (cdar fs)) (eq? (cadr (car fs)) name))
+           (let ([rhs (caddr (car fs))])
+             (if (and (pair? rhs) (eq? (car rhs) 'quote))
+                 (cadr rhs)
+                 (die name "is not a quoted list in" what)))]
+          [else (loop (cdr fs))])))
+
+;; (skint compile)'s own units, from the (include ...) forms of its .sld.
+(define (compile-includes sld)
+  (let ([forms (read-file-sexps sld #f)])
+    (unless (and (pair? forms) (pair? (car forms))
+                 (eq? (caar forms) 'define-library))
+      (die "not a define-library file:" sld))
+    (let loop ([ms (cddr (car forms))] [acc '()])
+      (cond [(null? ms) (reverse acc)]
+            [(and (pair? (car ms)) (eq? (caar ms) 'include)
+                  (pair? (cdar ms)) (string? (cadr (car ms))))
+             (loop (cdr ms) (cons (cadr (car ms)) acc))]
+            [else (loop (cdr ms) acc)]))))
+
+;; Every shadowed library name, as a path relative to clib/.
+(define (shadow-relpaths front)
+  (define (comp->string c)
+    (cond [(symbol? c) (symbol->string c)]
+          [(number? c) (number->string c)]
+          [else (die "shadow name component is neither symbol nor number:" c)]))
+  (map (lambda (ln)
+         (let loop ([cs ln] [acc ""])
+           (if (null? cs)
+               (string-append acc ".sld")
+               (loop (cdr cs)
+                     (if (string=? acc "")
+                         (comp->string (car cs))
+                         (string-append acc "/" (comp->string (car cs))))))))
+       (find-quoted-definition '*shadow-library-names*
+                               (read-file-sexps front #f)
+                               front)))
+
+;;; --- the import proper ----------------------------------------------------
+
+(define *copied* '())           ; reversed list of (dest . bytes)
+
+(define (bring! from to)
+  (unless (file-exists? from) (die "missing source file:" from))
+  (ensure-directory! (path-directory to))
+  (let ([n (copy-file! from to)])
+    (set! *copied* (cons (cons to n) *copied*))))
+
+(define (bring-all! srcdir dstdir names)
+  (for-each (lambda (n)
+              (bring! (path-join srcdir n)
+                      (path-join dstdir (path-strip-directory n))))
+            names))
+
+(define (write-sources path sk mv wc files)
+  (call-with-output-file path
+    (lambda (p)
+      (display "skomp imported sources" p) (newline p)
+      (display "======================" p) (newline p) (newline p)
+      (display "Written by pre/import.ssc.  Do not edit." p)
+      (newline p) (newline p)
+      (for-each
+       (lambda (name st)
+         (display name p) (newline p)
+         (for-each (lambda (k)
+                     (display "  " p) (display k p) (display ": " p)
+                     (display (cdr (assq k st)) p) (newline p))
+                   '(path commit date dirty))
+         (newline p))
+       '("skint" "marv" "wcpl") (list sk mv wc))
+      (display "files" p) (newline p)
+      (for-each (lambda (f)
+                  (display "  " p) (display (cdr f) p)
+                  (display "  " p) (display (car f) p) (newline p))
+                files))))
+
+(define (write-src-header path sk mv wc)
+  (call-with-output-file path
+    (lambda (p)
+      (display "/* skomp_src.h -- provenance of the imported sources." p)
+      (newline p)
+      (display " * Written by pre/import.ssc.  Do not edit. */" p)
+      (newline p) (newline p)
+      (for-each
+       (lambda (macro st)
+         (display "#define " p) (display macro p) (display " \"" p)
+         (display (cdr (assq 'commit st)) p)
+         (display " (" p) (display (cdr (assq 'date st)) p)
+         (display (if (string=? (cdr (assq 'dirty st)) "yes") ", dirty" "") p)
+         (display ")\"" p) (newline p))
+       '("SKOMP_SRC_SKINT" "SKOMP_SRC_MARV" "SKOMP_SRC_WCPL")
+       (list sk mv wc)))))
+
+(define (run sisters)
+  (define skint-dir (path-join sisters "skint"))
+  (define marv-dir  (path-join sisters "marv"))
+  (define wcpl-dir
+    (let ([a (path-join (path-join sisters "WCPL") "wcpl")]
+          [b (path-join sisters "wcpl")])
+      (cond [(file-exists? (path-join a "c.c")) a]
+            [(file-exists? (path-join b "c.c")) b]
+            [else (die "cannot find wcpl under" sisters
+                       "-- looked in WCPL/wcpl and wcpl")])))
+  ;; run from the repository root, so every destination path is relative to it
+  (unless (and (file-exists? "pre/import.ssc") (file-exists? "LICENSE"))
+    (die "run this from the skomp repository root"))
+  (unless (file-exists? (path-join skint-dir "s.c"))
+    (die "not a skint checkout:" skint-dir))
+  (unless (file-exists? (path-join marv-dir "m.c"))
+    (die "not a marv checkout:" marv-dir))
+
+  ;; ---- skint: the interpreter that hosts the compiler
+  (bring-all! skint-dir "skint"
+              '("s.c" "k.c" "i.c" "n.c" "t.c" "s.h" "i.h" "k.h" "n.h"))
+  ;; opt/n_enhtty.* is deliberately absent: skomp never enters a REPL, and the
+  ;; includes that would want it are guarded by OPT_ENHTTY.
+  (bring-all! skint-dir "skint/opt"
+              '("opt/i_tower.c" "opt/n_tower.c" "opt/n_tower.h"
+                "opt/n_unicode.c" "opt/n_unicode.h"))
+
+  ;; ---- (skint compile): the compiler library, with clib/ and srt/
+  (let* ([csrc (path-join skint-dir "lib/skint/compile")]
+         [sld (path-join skint-dir "lib/skint/compile.sld")]
+         [front (path-join csrc "cups-front.scm")])
+    (bring! sld "lib/skint/compile.sld")
+    (bring! (path-join csrc "README.md") "lib/skint/compile/README.md")
+    (let ([units (compile-includes sld)])
+      (when (null? units) (die "compile.sld includes no units"))
+      (for-each (lambda (u)
+                  ;; u is "compile/cups-base.scm", relative to the .sld
+                  (bring! (path-join (path-directory sld) u)
+                          (path-join "lib/skint" u)))
+                units)
+      (say "  derived " (length units) " compiler units from compile.sld"))
+    (bring-all! csrc "lib/skint/compile/srt"
+                '("srt/scmi.c" "srt/scmi.mvh" "srt/scmn.mvh"
+                  "srt/scmrt.c" "srt/scmrt.h" "srt/scmrt.mvh"))
+    (let ([rels (shadow-relpaths front)])
+      (for-each (lambda (r)
+                  (let ([from (path-join (path-join csrc "clib") r)])
+                    (unless (file-exists? from)
+                      (die "shadow library has no clib file:" r
+                           "-- skomp ships clib/ and nothing else of the"
+                           "host's library tree, so every shadowed name"
+                           "must have one"))
+                    (bring! from (path-join "lib/skint/compile/clib" r))))
+                rels)
+      (say "  derived " (length rels) " shadow libraries from cups-front.scm")))
+
+  ;; ---- marv: the assembler.  Its own lib/ and srt/ are not needed: compiled
+  ;; modules name only $scmrt and $scmi as system modules, and those come from
+  ;; the compiler's own srt/ above.
+  (bring-all! marv-dir "marv"
+              '("m.c" "r.c" "v.c" "a.c" "m.h" "r.h" "v.h" "a.h"))
+  (bring-all! marv-dir "target"
+              '("target/cc.mvt" "target/cl.mvt" "target/clang.mvt"
+                "target/gcc.mvt" "target/rv64g.mvt" "target/rv64g-cross.mvt"
+                "target/wcpl.mvt"))
+
+  ;; ---- wcpl: the WebAssembly backend.  Its headers and libraries are
+  ;; embedded in the binary, so there are no library files to bring.
+  (bring-all! wcpl-dir "wcpl"
+              '("c.c" "l.c" "p.c" "w.c" "c.h" "l.h" "p.h" "w.h"))
+
+  ;; ---- the honesty check on what was left out
+  (let ([hits (let loop ([ps *copied*] [acc '()])
+                (cond [(null? ps) acc]
+                      [(contains? (car (car ps)) "n_enhtty")
+                       (loop (cdr ps) (cons (car (car ps)) acc))]
+                      [else (loop (cdr ps) acc)]))])
+    (unless (null? hits) (die "n_enhtty was imported after all:" hits)))
+
+  ;; ---- the record
+  (let* ([stamp (lambda (dir)
+                  (list (cons 'path dir)
+                        (cons 'commit (git-field dir "rev-parse --short HEAD"))
+                        (cons 'date (git-field dir
+                                     "log -1 --format=%ad --date=short"))
+                        (cons 'dirty (if (git-dirty? dir) "yes" "no"))))]
+         [sk (stamp skint-dir)] [mv (stamp marv-dir)] [wc (stamp wcpl-dir)]
+         [files (reverse *copied*)])
+    (write-sources "pre/SOURCES.txt" sk mv wc files)
+    (write-src-header "skomp_src.h" sk mv wc)
+    (say "imported " (length files) " files")
+    (for-each (lambda (name st)
+                (say "  " name " " (cdr (assq 'commit st))
+                     " " (cdr (assq 'date st))
+                     (if (string=? (cdr (assq 'dirty st)) "yes")
+                         " (dirty)" "")))
+              '("skint" "marv " "wcpl ") (list sk mv wc))
+    (say "wrote pre/SOURCES.txt and skomp_src.h")))
+
+(let ([args (cdr (command-line))])
+  (run (if (null? args) ".." (car args))))

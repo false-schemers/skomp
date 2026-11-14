@@ -1,0 +1,121 @@
+.\" SKOMP.1.in  --  man page template for SKOMP
+.\" substitute @VERSION@ and @SKOMPHOME@ at build time
+.TH SKOMP 1 "@DATE@" "SKOMP @VERSION@" "User Commands"
+.SH NAME
+skomp \- whole-program R7RS Scheme compiler
+.SH SYNOPSIS
+.B skomp
+[\fB\-t\fR \fITARGDES\fR] [\fB\-c\fR] [\fIOPTION\fR]... \fIFILE\fR
+.SH DESCRIPTION
+\fBskomp\fR compiles one R7RS Scheme program to a native executable or to a
+WebAssembly binary.
+.PP
+\fIFILE\fR is one Scheme program.  The compiler is a whole-program compiler:
+it expands the program and every library it imports into a single module, so
+there is nothing to compile separately and nothing to link on the Scheme side.
+A second input file is an error.
+.PP
+\fBskomp\fR runs three programs of its own in turn: a Scheme interpreter
+hosting the compiler library, the MARV assembler, and \(em for the
+WebAssembly target \(em the WCPL linker.  None of the three is on the user's
+\fBPATH\fR, and a public copy of any of them installed on the same machine is
+neither used nor disturbed.
+.SH OPTIONS
+.TP
+.BR \-t ", " \-\-target =\fITARGDES\fR
+Target description name, or a path to a \fI.mvt\fR file.  Default is \fBcl\fR
+on Windows and \fBcc\fR elsewhere.
+.TP
+.BR \-T ", " \-\-target\-dir =\fIDIR\fR
+Add \fIDIR\fR to MARV's \fI.mvt\fR lookup path, for target descriptions of
+your own.
+.TP
+.BR \-c ", " \-\-compile
+Compile to a target object file without linking.  Without \fB\-o\fR the object
+is written beside the input with the target's own extension.
+.TP
+.BR \-S ", " \-\-marv\-source
+Stop after writing the MARV module.  Without \fB\-o\fR it is written beside
+the input as \fIFILE\fB.mvs\fR.
+.TP
+.BR \-o ", " \-\-output =\fIFILE\fR
+Output pathname.  Required unless \fB\-c\fR or \fB\-S\fR is given.
+.TP
+.BI \-O " LEVEL"
+Optimization level 0..3 for the backend C compiler, passed to MARV.  It does
+not change the Scheme compiler's own code generation.
+.TP
+.BR \-I ", " \-\-prepend\-libdir =\fIDIR\fR
+Prepend \fIDIR\fR to the Scheme library search path.
+.TP
+.BR \-A ", " \-\-append\-libdir =\fIDIR\fR
+Append \fIDIR\fR to the Scheme library search path.
+.TP
+.BI \-L " DIR"
+Synonym for \fB\-A\fR.
+.TP
+.BI \-\-scheme\-optimize= N
+The compiler's own optimization level, 0..3.  Default is 1; the other levels
+are accepted and validated but not yet interpreted.
+.TP
+.BI \-\-split\-funcs= N
+Passed to MARV: on a \fBcc\fR target, cut the generated C into pieces of at
+most \fIN\fR function definitions, each compiled as its own translation unit.
+.TP
+.BR \-v ", " \-\-verbose
+Print each command before running it.
+.TP
+.BR \-n ", " \-\-dry\-run
+Print the backend commands instead of running them.
+.TP
+.BR \-M ", " \-\-makefile\-dir =\fIDIR\fR
+Write a self-contained build directory with a makefile in \fIDIR\fR instead of
+running the backend compiler.  \fIDIR\fR must be empty or not yet exist.
+Cannot be combined with \fB\-c\fR or \fB\-S\fR, and requires \fB\-o\fR.
+.TP
+.BR \-h ", " \-\-help
+Print usage.
+.TP
+.BR \-V ", " \-\-version
+Print skomp's version, the commit of each imported part, and the private root
+in use.
+.SH ENVIRONMENT
+.TP
+.B SKOMP_HOME
+The directory holding \fBbin/\fR, \fBlib/\fR and \fBtarget/\fR.  Overrides
+both the path compiled in at build time (@SKOMPHOME@) and \fBskomp\-home\fR
+beside the executable.
+.PP
+\fBskomp\fR sets \fBSKINT_LIBDIRS\fR, \fBPATH\fR, \fBWCPL_INCLUDE_PATH\fR and
+\fBWCPL_LIBRARY_PATH\fR for the programs it runs, and for those only.
+\fBSKINT_LIBDIRS\fR is replaced rather than extended, so a value inherited
+from the shell cannot add a library the compiler would then serve.
+.SH EXIT STATUS
+0 on success.  On failure, the exit code of whichever part failed, or 1 when
+that cannot be represented.
+.SH FILES
+.TP
+.I @SKOMPHOME@/bin
+The hosted Scheme interpreter, the MARV assembler and the WCPL linker.
+.TP
+.I @SKOMPHOME@/lib
+The compiler library, its own standard library tree, and the Scheme runtime.
+.TP
+.I @SKOMPHOME@/target
+MARV target descriptions.
+.SH EXAMPLES
+.nf
+skomp \-o app app.scm                 # a native executable
+skomp \-t wcpl \-o app.wasm app.scm    # a WASI WebAssembly binary
+skomp \-c app.scm                     # a target object file, no link
+skomp \-S app.scm                     # stop at the MARV module
+skomp \-M build \-o app app.scm        # a self\-contained build directory
+.fi
+.SH SEE ALSO
+.BR skint (1)
+.PP
+The command-line reference, the pipeline and the limits of the compiled
+library set are documented in the distribution's \fIdoc/\fR directory and in
+\fIlib/skint/compile/README.md\fR.
+.SH BUGS
+Report at <https://github.com/false-schemers/skomp/issues>.

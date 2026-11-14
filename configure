@@ -1,0 +1,22 @@
+#!/bin/bash
+
+for arg in "$@"; do
+   case $arg in
+       --prefix=*)
+           PREFIX="${arg#*=}"
+           ;;
+       --libexecdir=*)
+           LIBEXECDIR="${arg#*=}"
+           ;;
+       *)
+           echo "Usage: $0 [--prefix=PATH] [--libexecdir=PATH]" >&2
+           echo "  --prefix      where skomp is installed (default /usr/local)" >&2
+           echo "  --libexecdir  where its private parts go" >&2
+           echo "                (default PREFIX/libexec; Debian prefers PREFIX/lib)" >&2
+           exit 1
+           ;;
+   esac
+done
+
+echo PREFIX="${PREFIX:-/usr/local}" > config.mk
+echo LIBEXECDIR="${LIBEXECDIR:-${PREFIX:-/usr/local}/libexec}" >> config.mk

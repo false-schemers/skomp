@@ -1,0 +1,2461 @@
+/* n.c -- native/platform interfaces */
+
+#include "s.h"
+#include "n.h"
+
+#ifdef NAN_BOXING
+
+#ifndef NDEBUG
+long getim0s(obj o) {
+  assert(isim0(o));
+  return (int32_t)(((((uint32_t)o >> 2) & 0x3fffffff) ^ 0x20000000) - 0x20000000);
+}
+long getimmu(obj o, int t) {
+  assert(isimm((o), t));
+  return (long)(((uint32_t)o >> 8) & 0xffffff);
+}
+#endif
+
+#else
+
+#ifndef NDEBUG
+long getim0s(obj o) {
+  assert(isim0(o));
+  return (int)((((o >> 2) & 0x3fffffff) ^ 0x20000000) - 0x20000000);
+}
+long getimmu(obj o, int t) {
+  assert(isimm(o, t));
+  return (long)((o >> 8) & 0xffffff);
+}
+#endif
+
+#endif
+
+#ifndef NDEBUG
+int is_native(obj o, cxtype_t *tp) {
+  return isobjptr(o) && objptr_from_obj(o)[-1] == (obj)tp; 
+}
+void *get_native(obj o, cxtype_t *tp) {
+  assert(is_native(o, tp));
+  return (void*)(*objptr_from_obj(o));
+}
+void set_native(obj o, cxtype_t *tp, void *v) {
+  assert(is_native(o, tp));
+  *objptr_from_obj(o) = (obj)v;
+}
+#endif
+
+#ifndef NDEBUG
+
+/* what these assert: see doc/internals/notes.md [7] */
+
+int is_typed(obj o) {
+  if (!is_tagged(o, TYPED_MTAG)) return 0;
+  else { obj h = objptr_from_obj(o)[-1];
+    assert(notaptr(h));
+    assert(size_from_obj(h) >= 1); /* with a cell 0 for the rtd */
+    return 1; }
+}
+obj ck_typed(obj o) {
+  assert(is_typed(o));
+  return o;
+}
+obj* typed_type(obj o) {
+  assert(is_typed(o));
+  return &block_ref(o, 0);
+}
+int typed_len(obj o) {
+  assert(is_typed(o));
+  return block_len(o) - 1;
+}
+obj* typed_ref(obj o, int i) {
+  int len; assert(is_typed(o));
+  len = block_len(o);
+  assert(i >= 0 && i < len-1);  
+  return &block_ref(o, i+1);
+}
+#endif
+
+/* numbers */
+
+#ifndef NDEBUG
+long fxneg(long x) { 
+  ASSERT(x != FIXNUM_MIN);
+  return -x; 
+}
+long fxabs(long x) { 
+  ASSERT(x != FIXNUM_MIN);
+  return labs(x); 
+}
+long fxadd(long x, long y) { 
+  long z = x + y; 
+  ASSERT(z >= FIXNUM_MIN && z <= FIXNUM_MAX);
+  return z; 
+}
+long fxsub(long x, long y) { 
+  long z = x - y; 
+  ASSERT(z >= FIXNUM_MIN && z <= FIXNUM_MAX); 
+  return z; 
+}
+long fxmul(long x, long y) { 
+  double z = (double)x * (double)y;
+  ASSERT(z >= FIXNUM_MIN && z <= FIXNUM_MAX);
+  return x * y; 
+}
+/* exact integer division */
+long fxdiv(long x, long y) { 
+  ASSERT(y); 
+  ASSERT(x != FIXNUM_MIN || y != -1);
+  ASSERT(x % y == 0);
+  return x / y; 
+}
+/* truncated division (common/C99) */
+long fxquo(long x, long y) { 
+  ASSERT(y); ASSERT(x != FIXNUM_MIN || y != -1);
+  return x / y; 
+}
+long fxrem(long x, long y) { 
+  ASSERT(y);
+  return x % y; 
+}
+/* floor division */
+long fxmqu(long x, long y) {
+  long q, r; ASSERT(y); ASSERT(x != FIXNUM_MIN || y != -1);
+  q = x / y, r = x % y;
+  return ((r < 0 && y > 0) || (r > 0 && y < 0)) ? q - 1 : q;
+}
+long fxmlo(long x, long y) {
+  long r; ASSERT(y); r = x % y;
+  return ((r < 0 && y > 0) || (r > 0 && y < 0)) ? r + y : r;
+}
+/* euclidean division */
+long fxeuq(long x, long y) { 
+  long q, r; ASSERT(y); ASSERT(x != FIXNUM_MIN || y != -1);
+  q = x / y, r = x % y; 
+  return (r < 0) ? ((y > 0) ? q - 1 : q + 1) : q;
+}
+long fxeur(long x, long y) {
+  long r; ASSERT(y); r = x % y; 
+  return (r < 0) ? ((y > 0) ? r + y : r - y) : r;
+} 
+long fxgcd(long x, long y) {
+  long a = labs(x), b = labs(y), c; 
+  while (b) c = a%b, a = b, b = c; 
+  ASSERT(a <= FIXNUM_MAX);
+  return a;
+} 
+long fxasl(long x, long y) {
+  ASSERT(y >= 0 && y < FIXNUM_WIDTH); 
+  return x << y;
+} 
+long fxasr(long x, long y) {
+  ASSERT(y >= 0 && y < FIXNUM_WIDTH);
+  ASSERT(!y || x >= 0); /* >> of negative x is undefined */ 
+  return x >> y;
+} 
+long fxflo(double f) {
+  long l = (long)f; ASSERT((double)l == f);
+  ASSERT(l >= FIXNUM_MIN && l <= FIXNUM_MAX);
+  return l;
+}
+#endif
+
+long fxaddc(long x, long y, long *pc) { 
+  int64_t z = (int64_t)x + (int64_t)y + (int64_t)*pc;
+  long zq = (long)(z >> FIXNUM_WIDTH), zr = (long)(z & FIXNUM_MASK);
+  if (zr & FIXNUM_SIGN) zq += 1; *pc = (zr ^ FIXNUM_SIGN) - FIXNUM_SIGN;
+  return zq;
+}
+
+long fxsubc(long x, long y, long *pc) { 
+  int64_t z = (int64_t)x - (int64_t)y - (int64_t)*pc;
+  long zq = (long)(z >> FIXNUM_WIDTH), zr = (long)(z & FIXNUM_MASK);
+  if (zr & FIXNUM_SIGN) zq += 1; *pc = (zr ^ FIXNUM_SIGN) - FIXNUM_SIGN;
+  return zq;
+}
+
+long fxmulc(long x, long y, long *pc) { 
+  int64_t z = (int64_t)x * (int64_t)y + (int64_t)*pc;
+  long zq = (long)(z >> FIXNUM_WIDTH), zr = (long)(z & FIXNUM_MASK);
+  if (zr & FIXNUM_SIGN) zq += 1; *pc = (zr ^ FIXNUM_SIGN) - FIXNUM_SIGN;
+  return zq;
+}
+
+long fxpow(long x, long y) { 
+  if (y < 0 || x == 0) return 0;
+  else if (y == 0) return 1; else if (y == 1) return x;
+  else { int64_t lx = x, ly = y, lz = 1;
+    while (ly > 0) {
+      if (ly & 1) { lz *= lx; if (lz < FIXNUM_MIN || lz > FIXNUM_MAX) return 0; }
+      if ((ly >>= 1) > 0) { lx *= lx; if (lx < FIXNUM_MIN || lx > FIXNUM_MAX) return 0; }
+    }
+    return (long)lz;  
+  }
+}
+
+long fxsqrt(long x) { 
+  if (x < 0) return 0; if (x < 2) return x;
+  else { long s = fxsqrt(x >> 2) << 1, l = s + 1; return l*l > x ? s : l; }
+}
+
+int fxifdv(long x, long y, long *pi, double *pd) { 
+  ASSERT(y); ASSERT(x != FIXNUM_MIN || y != -1);
+  if (x % y == 0) { *pi = x / y; return 1; }
+  else { *pd = (double)x / (double)y; return 0; }  
+}
+
+int fxlen(long x) {
+  int t = 0;
+  for (;;) switch (x) {
+    case 0: case -1: return t;
+    case 1: case -2: return t + 1;
+    case 2: case 3: case -3: case -4: return t + 2;
+    case 4: case 5: case 6: case 7:
+    case -5: case -6: case -7: case -8: return t + 3;
+    default: if (x < 0) x = (x+1)/16-1; else x /= 16; t += 4;
+  }
+}
+
+int fxbtc(long x) {
+  int neg = (x < 0), c;
+  for (c = 0, x &= FIXNUM_MASK; x != 0; x &= x-1) ++c;
+  return neg ? FIXNUM_WIDTH - c : c;
+}
+
+double flquo(double x, double y) {
+  double z; ASSERT(y != 0.0 && flisint(x) && flisint(y));
+  modf(x / y,  &z);
+  return z;
+}
+
+double flrem(double x, double y) {
+  ASSERT(y != 0.0 && flisint(x) && flisint(y));
+  return fmod(x, y);
+}
+
+double flmqu(double x, double y) {
+  ASSERT(y != 0.0 && flisint(x) && flisint(y));
+  return floor(x / y);
+}
+
+double flmlo(double x, double y) {
+  ASSERT(y != 0.0 && flisint(x) && flisint(y));
+  return x - y * floor(x / y);
+}
+
+double flgcd(double x, double y) {
+  double a = fabs(x), b = fabs(y), c; 
+  ASSERT(flisint(a) && flisint(b));
+  while (b > 0.0) c = fmod(a, b), a = b, b = c; 
+  return a;
+}
+
+double flround(double x) {
+  double f = floor(x), c = ceil(x), d = x-f, u = c-x; 
+  if (d == u) return fmod(f, 2.0) == 0.0 ? f : c;
+  else return (d < u) ? f : c;
+}
+
+#ifdef FLONUMS_BOXED
+static cxtype_t cxt_flonum = { "flonum", free };
+
+cxtype_t *FLONUM_NTAG = &cxt_flonum;
+
+flonum_t *dupflonum(flonum_t f) {
+  flonum_t *pf = cxm_cknull(malloc(sizeof(flonum_t)), "malloc(flonum)");
+  *pf = f; return pf;
+}
+#endif
+
+/* strings */
+
+static cxtype_t cxt_string = { "string", free };
+
+cxtype_t *STRING_NTAG = &cxt_string;
+
+#ifdef OPT_UNICODE
+#include "opt/n_unicode.c"
+#else /* ascii representation block */
+
+#ifndef NDEBUG
+char* string_refp(obj o, int i) {
+  const int *d = string_data(o); assert(i >= 0 && i < d[0]);  
+  return sdatachars(d)+i;
+}
+#endif
+
+int *newsdata(const char *s) {
+  int l, *d; assert(s); l = (int)strlen(s); 
+  d = cxm_cknull(malloc(sizeof(int)+l+1), "malloc(string)");
+  d[0] = l; strcpy(sdatachars(d), s); return d;
+}
+
+int *newsdatan(const char *s, int n) {
+  int *d; char *ns; assert(s); assert(n >= 0);
+  d = cxm_cknull(malloc(sizeof(int)+n+1), "malloc(stringn)");
+  d[0] = n; memcpy((ns = sdatachars(d)), s, n); ns[n] = 0; return d;
+}
+
+int *makesdata(int n, int c) {
+  int *d; char *s; assert(n+1 > 0); 
+  d = cxm_cknull(malloc(sizeof(int)+n+1), "malloc(string)");
+  d[0] = n; s = sdatachars(d); memset(s, c, n); s[n] = 0;
+  return d;
+}
+
+int *subsdata(const int *d0, int from, int to) {
+  int n = to-from, *d1; char *s0, *s1; assert(d0);
+  assert(0 <= from && from <= to && to <= sdatalen(d0)); 
+  d1 = cxm_cknull(malloc(sizeof(int)+n+1), "malloc(string)");
+  d1[0] = n; s0 = sdatachars(d0); s1 = sdatachars(d1); 
+  memcpy(s1, s0+from, n); s1[n] = 0;
+  return d1;
+}
+
+int *catsdata(const int *d0, const int *d1) {
+  int l0 = sdatalen(d0), l1 = sdatalen(d1), n = l0+l1; char *s0, *s1, *s;
+  int *d = cxm_cknull(malloc(sizeof(int)+n+1), "malloc(string)");
+  d[0] = n; s = sdatachars(d); s0 = sdatachars(d0); s1 = sdatachars(d1);
+  memcpy(s, s0, l0); memcpy(s+l0, s1, l1); s[n] = 0;
+  return d;
+}
+
+int *dupsdata(const int *d0) {
+  int n = sdatalen(d0), *d1 = cxm_cknull(malloc(sizeof(int)+n+1), "malloc(string)");
+  memcpy(d1, d0, sizeof(int)+n+1);
+  return d1;
+}
+
+int *mapsdata(const int *d, int (*f)(int)) {
+  int i, n = sdatalen(d), *d1 = cxm_cknull(malloc(sizeof(int)+n+1), "malloc(string)");
+  const char *s = sdatachars(d); char *s1 = sdatachars(d1);
+  d1[0] = d[0]; for (i = 0; i < n; ++i) *s1++ = (*f)(*s++);   
+  *s1 = 0; /*[cco] terminate, as newsdatan, makesdata and subsdata all do */
+  return d1;
+}
+
+int sdatacmp(const int *d1, const int *d2) {
+  int len1 = sdatalen(d1), len2 = sdatalen(d2); 
+  char *s1 = sdatachars(d1), *s2 = sdatachars(d2);
+  int cmp = memcmp(s1, s2, len1 < len2 ? len1 : len2);
+  if (cmp != 0) return cmp;
+  if (len1 < len2) return -1;
+  if (len1 > len2) return 1;
+  return 0;
+}
+
+int *stringr(int sc, obj pso[]) {
+  int i, *d; unsigned char *s; assert(sc >= 0);
+  for (i = 0; i < sc; ++i) if (!is_char(pso[i])) return NULL; 
+  d = cxm_cknull(malloc(sizeof(int)+sc+1), "malloc(string)");
+  d[0] = sc; s = (unsigned char *)sdatachars(d);
+  for (i = sc-1; i >= 0; --i) *s++ = get_char(pso[i]); 
+  *s = 0;
+  return d;
+}
+
+int *stringrcat(int sc, obj pso[]) {
+  int i, n = 0, *d; unsigned char *s;
+  assert(sc >= 0);
+  for (i = 0; i < sc; ++i) { 
+    const int *di; obj oi = pso[i]; 
+    if (!is_string(oi)) return NULL; 
+    di = string_data(oi); n += sdatalen(di);
+  }
+  d = cxm_cknull(malloc(sizeof(int)+n+1), "malloc(string)");
+  d[0] = n; s = (unsigned char *)sdatachars(d);
+  for (i = sc-1; i >= 0; --i) {
+    obj oi = pso[i]; const int *di = string_data(oi), ni = sdatalen(di);
+    memcpy(s, sdatachars(di), ni); s += ni;
+  }
+  *s = 0;
+  return d;
+}
+
+int sdatacmp_ci(const int *d1, const int *d2) {
+  int len1 = sdatalen(d1), len2 = sdatalen(d2); 
+  char *s1 = sdatachars(d1), *e1 = s1 + len1;
+  char *s2 = sdatachars(d2), *e2 = s2 + len2; 
+  while (s1 < e1 && s2 < e2) {
+    int c1 = tolower(*s1++), c2 = tolower(*s2++);
+    if (c1 < c2) return -1; if (c1 > c2) return 1;
+  }
+  if (len1 < len2) return -1;
+  if (len1 > len2) return 1;
+  return 0;
+}
+
+unsigned long sdatahash(const int *d) {
+  const char *s = sdatachars(d);
+  unsigned long i = 0, l = (unsigned long)sdatalen(d), h = l;
+  while (i < l) h = (h << 4) ^ (h >> 28) ^ s[i++];
+  return h ^ (h  >> 10) ^ (h >> 20);
+}
+
+static char inisub_map[256] = { /* ini: [a-zA-Z!$%&*:/<=>?@^_~] sub: ini + [0123456789.@+-] */
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 1, 0, 0, 1, 1, 1, 0, 0, 0, 1, 2, 0, 2, 2, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 0, 1, 1, 1, 1,
+  1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1,
+  0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+}; /* NB: 0 at num_map[255], so EOF maps to 0 */
+
+#define isnumsym(c) (inisub_map[(c) & 0xFF])
+
+/* check if s[0..blen-1] can be printed as a symbol without vertical bars
+ * s can have internal \0s, but it is 0-terminated (s[blen] == 0) */
+int cleansymname(const char *s, int blen) {
+  const char *p = s; int bl = blen; if (bl < 1) return 0; assert(s[bl] == 0);
+  while (bl-- > 0) if (inisub_map[*p++ & 0xFF] == 0) return 0;
+  if (inisub_map[s[0] & 0xFF] == 1) return 1;
+  if (s[0] == '+' || s[0] == '-') {
+    if (blen == 1) return 1;
+    if (blen == 2 && (s[1] == 'i' || s[1] == 'I')) return 0;
+    if (blen >= 6 && (strncmp_ci(s+1, "inf.0", 5) == 0 || strncmp_ci(s+1, "nan.0", 5) == 0)) return 0;
+    if (blen >= 2 && s[1] == '.' && !isdigit(s[2])) return 1; 
+    if (s[1] != '.' && !isdigit(s[1])) return 1;
+    return 0;
+  }
+  return (blen >= 2 && s[0] == '.' && !isdigit(s[1])); 
+}
+
+#endif /* end of !OPT_UNICODE block */
+
+int strcmp_ci(const char *s1, const char *s2) { /* s1 or s2 should be ascii */
+  int c1, c2, d;
+  do { c1 = *s1++; c2 = *s2++; d = (unsigned)tolower(c1) - (unsigned)tolower(c2); } 
+  while (!d && c1 && c2);
+  return d;
+}
+
+int strncmp_ci(const char *s1, const char *s2, size_t n) { 
+  int c1, c2, d = 0; const char *e1 = s1+n;
+  do { c1 = *s1++; c2 = *s2++; d = (unsigned)tolower(c1) - (unsigned)tolower(c2); } 
+  while (!d && c1 && c2 && s1 < e1);
+  return d;
+}
+
+
+/* bytevectors */
+
+static cxtype_t cxt_bytevector = { "bytevector", free };
+
+cxtype_t *BYTEVECTOR_NTAG = &cxt_bytevector;
+
+#define mallocbvdata(n) cxm_cknull(calloc(2*sizeof(int)+(n), 1), "malloc(bytevector)")
+
+#ifndef NDEBUG
+unsigned char* bytevector_refp(obj o, int i) {
+  int *d = bytevector_data(o); assert(i >= -2 && i < d[0]); return (bvdatabytes(d))+i;
+}
+#endif
+
+int *newbytevector(unsigned char *s, int n) {
+  int *d; assert(s); assert(n >= 0); 
+  d = mallocbvdata(n); d[0] = n; d[1] = 0; memcpy(bvdatabytes(d), s, n); return d;
+}
+
+int *makebytevector(int n, int c) {
+  int *d; assert(n >= 0); 
+  d = mallocbvdata(n); d[0] = n; d[1] = 0; memset(bvdatabytes(d), c, n);
+  return d;
+}
+
+int *allocbytevector(int n) {
+  int *d = mallocbvdata(n); d[0] = n; d[1] = 0; return d;
+}
+
+int *dupbytevector(int *d0) {
+  int *d1 = mallocbvdata(d0[0]); d1[0] = d0[0]; d1[1] = d0[1]; 
+  memcpy(bvdatabytes(d1), bvdatabytes(d0), d0[0]); 
+  return d1;
+}
+
+int bytevectoreq(int *d0, int *d1) {
+  int l0 = d0[0], l1 = d1[0], t0 = d0[1], t1 = d1[1];
+  return (l0 != l1 || t0 != t1) ? 0 : memcmp(bvdatabytes(d0), bvdatabytes(d1), l0) == 0; 
+}
+
+int *subbytevector(int *d0, int from, int to) {
+  int n = to-from, *d1; unsigned char *s0, *s1; assert(d0);
+  assert(0 <= from && from <= to && to <= d0[0]); 
+  d1 = mallocbvdata(n); d1[0] = n; d1[1] = d0[1]; 
+  s0 = bvdatabytes(d0); s1 = bvdatabytes(d1); 
+  memcpy(s1, s0+from, n); return d1;
+}
+
+/* pairs/lists */
+
+int is_list(obj l) {
+  obj s = l;
+  for (;;) {
+    if (is_null(l)) return 1;
+    else if (!is_pair(l)) return 0;
+    else if ((l = pair_cdr(l)) == s) return 0;
+    else if (is_null(l)) return 1;
+    else if (!is_pair(l)) return 0;
+    else if ((l = pair_cdr(l)) == s) return 0;
+    else s = pair_cdr(s); 
+  }
+}
+
+/* symbols */
+
+/* symbol table */
+static struct { int **a; int ***v; size_t sz; size_t u; size_t maxu; } symt;
+
+/* intern d into symt; d is owned by the caller if dup != 0, by symt otherwise */
+int internsdata(int *d, int dup) {
+  size_t i, j; /* based on a code (C) 1998, 1999 by James Clark. */
+  if (symt.sz == 0) { /* init */
+    symt.a = cxm_cknull(calloc(64, sizeof(char*)), "symtab[0]");
+    symt.v = cxm_cknull(calloc(64, sizeof(char**)), "symtab[1]");
+    symt.sz = 64, symt.maxu = 64 / 2;
+    i = sdatahash(d) & (symt.sz-1);
+  } else {
+    unsigned long h = sdatahash(d);
+    for (i = h & (symt.sz-1); symt.v[i]; i = (i-1) & (symt.sz-1))
+      if (sdatacmp(d, *symt.v[i]) == 0) {
+        if (!dup) free(d); /* owned by symt */
+        return (int)(symt.v[i] - symt.a);
+      }
+    if (symt.u == symt.maxu) { /* rehash */
+      size_t nsz = symt.sz * 2;
+      int **na = cxm_cknull(calloc(nsz, sizeof(int*)), "symtab[2]");
+      int ***nv = cxm_cknull(calloc(nsz, sizeof(int**)), "symtab[3]");
+      for (i = 0; i < symt.sz; i++)
+        if (symt.v[i]) {
+          for (j = sdatahash(*symt.v[i]) & (nsz-1); nv[j]; j = (j-1) & (nsz-1)) ;
+          nv[j] = symt.v[i] - symt.a + na;
+        }
+      free(symt.v); symt.v = nv; symt.sz = nsz; symt.maxu = nsz / 2;
+      memcpy(na, symt.a, symt.u * sizeof(int*)); free(symt.a); symt.a = na; 
+      for (i = h & (symt.sz-1); symt.v[i]; i = (i-1) & (symt.sz-1)) ;
+    }
+  }
+  *(symt.v[i] = symt.a + symt.u) = dup ? dupsdata(d) : d;
+  return (int)((symt.u)++);
+}
+
+int internsym(const char *name) {
+  /* NB: in unicode mode, newsdata scans & validates */
+  return internsdata(newsdata(name), 0); 
+}
+
+const int *symsdata(int sym) {
+  assert(sym >= 0); assert(sym < (int)symt.u);
+  return symt.a[sym];
+} 
+
+const char *symbolname(int sym) {
+  assert(sym >= 0); assert(sym < (int)symt.u);
+  return sdatachars(symt.a[sym]);
+}
+
+/* procedures/closures */
+
+#ifndef NDEBUG
+
+/* what these assert: see doc/internals/notes.md [7] */
+int is_procedure(obj o) {
+  if (!isobjptr(o)) return 0;
+  else { obj h = objptr_from_obj(o)[-1];
+    if (!obj_is_blkhdr(h, CLOSURE_MTAG)) return 0;
+    assert(size_from_obj(h) >= 1);
+    assert(is_vector(block_ref(o, 0)));
+    assert(block_len(block_ref(o, 0)) >= 2);
+    return 1; }
+}
+
+int procedure_len(obj o) {
+  assert(is_procedure(o));
+  return block_len(o);
+}
+
+obj* procedure_refp(obj o, int i) {
+  int len; assert(is_procedure(o));
+  len = block_len(o);
+  assert(i >= 0 && i < len);
+  return &block_ref(o, i);   
+}
+
+#endif
+
+/* common i/o utils */
+
+char *msearch(const char *h, int hlen, const char *n, int nlen)
+{
+  int c0; const char *l, *p;
+  if (nlen <= 0) return (char *)h;
+  if (nlen > hlen) return NULL;
+  c0 = *n; l = h + (hlen - nlen + 1);
+  for (p = h; p < l; ++p) {
+    p = memchr(p, c0, l-p);
+    if (!p) break;
+    if (memcmp(p, n, nlen) == 0) return (char *)p;
+  }
+  return NULL;
+}
+
+cbuf_t* cbinit(cbuf_t* pcb) {
+  pcb->fill = pcb->buf = cxm_cknull(malloc(64), "malloc(cbdata)");
+  pcb->end = pcb->buf + 64; return pcb;
+}
+
+cbuf_t* newcb(void) {
+  cbuf_t* pcb = cxm_cknull(malloc(sizeof(cbuf_t)), "malloc(cbuf)");
+  return cbinit(pcb);
+}
+
+void freecb(cbuf_t* pcb) { if (pcb) { free(pcb->buf); free(pcb); } }
+
+void cbgrow(cbuf_t* pcb, size_t n) {
+  size_t oldsz = pcb->end - pcb->buf, newsz = oldsz*2;
+  size_t cnt = pcb->fill - pcb->buf;
+  if (oldsz + n > newsz) newsz += n;
+  pcb->buf = cxm_cknull(realloc(pcb->buf, newsz), "realloc(cbdata)");
+  pcb->fill = pcb->buf + cnt, pcb->end = pcb->buf + newsz;
+}
+
+char* cballoc(cbuf_t* pcb, size_t n) {
+  assert(pcb); /* allow for extra 1 char after n */
+  if (pcb->fill + n+1 > pcb->end) cbgrow(pcb, n+1);
+  pcb->fill += n;
+  return pcb->fill - n;
+}
+
+int cbputc(int c, cbuf_t* pcb) {
+  if (pcb->fill == pcb->end) cbgrow(pcb, 1); 
+  *(pcb->fill)++ = c; return c;
+}
+
+static void cbfini(cbuf_t* pcb) { free(pcb->buf); pcb->buf = NULL; }
+
+size_t cblen(cbuf_t* pcb) { return pcb->fill - pcb->buf; }
+
+char* cbdata(cbuf_t* pcb) {
+  if (pcb->fill == pcb->end) cbgrow(pcb, 1); *(pcb->fill) = 0; return pcb->buf; 
+}
+
+cbuf_t *cbclear(cbuf_t *pcb) { pcb->fill = pcb->buf; return pcb; }
+
+/* shared generic methods */
+
+static void nofree(void *p) {}
+
+static int noclose(void *p) { return 0; }
+
+static int nogetch(void *p) { return EOF; }
+
+static int noungetch(int c) { return c; }
+
+static int noputch(int c, void *p) { return EOF; }
+
+static int noctl(ctlop_t op, void *p, ...) { return -1; }
+
+static void ffree(void *vp) {
+  FILE *fp = vp; assert(fp); 
+  if (fp != stdin && fp != stdout && fp != stderr) fclose(fp);
+}
+
+/* file input ports */
+
+tifile_t *tialloc(FILE *fp, int fns) {
+  tifile_t *tp = cxm_cknull(malloc(sizeof(tifile_t)), "malloc(tifile)");
+  cbinit(&tp->cb); tp->next = tp->cb.buf; *(tp->next) = 0;
+  tp->fp = fp; tp->lno = 0; tp->fns = fns; tp->flags = TIF_NONE;
+  return tp; 
+}
+
+static void tifree(tifile_t *tp) { 
+  assert(tp); cbfini(&tp->cb); ffree(tp->fp); free(tp); 
+}
+
+static int tigetch(tifile_t *tp) {
+  int c; retry: c = unextc_check(tp->next); 
+  if (c != 0 || tp->next <= tp->cb.fill) return c; 
+  else if (tp->flags & TIF_EOF || !tp->fp) { /* done */
+    tp->next = cbdata(cbclear(&tp->cb));
+    return EOF; 
+  } else { /* refill with next line from fp */
+    cbuf_t *pcb = cbclear(&tp->cb); FILE *fp = tp->fp; 
+    char *line = fgets(cballoc(pcb, 256), 256, fp);
+    if (!line) { cbclear(pcb); tp->flags |= TIF_EOF; }
+    else { /* manually add the rest of the line */
+      size_t len = strlen(line); pcb->fill = pcb->buf + len;
+      if (len > 0 && line[len-1] != '\n') {
+        do { c = getc(fp); if (c == EOF) break; cbputc(c, pcb); } while (c != '\n');
+        if (c == EOF) tp->flags |= TIF_EOF;
+      }
+    }
+    tp->lno += 1; tp->next = cbdata(pcb); /* 0-term */
+    goto retry;
+  }
+}
+
+static int tiungetch(int c, tifile_t *tp) { 
+  assert(tp->next > tp->cb.buf && tp->next <= tp->cb.fill);
+  tp->next = uungetch(c, &tp->cb, tp->next);
+  return c;
+}
+
+static int tictl(ctlop_t op, tifile_t *tp, ...) {
+  switch (op) {
+    case CTLOP_ICL: {
+      /* ignore current buffer; next tigetch will refill */
+      tp->next = tp->cb.fill;
+      assert(tp->next[0] == 0);
+      return 0;
+    } break;
+    case CTLOP_RDLN: {
+      va_list args; int c, n, **pd;
+      va_start(args, tp); 
+      pd = va_arg(args, int **);
+      c = tigetch(tp);
+      if (c == EOF) {
+        *pd = NULL;
+      } else {
+        char *s; tiungetch(c, tp);
+        s = tp->next; n = (int)(tp->cb.fill - s);
+        if (n > 0 && s[n-1] == '\n') --n;
+        *pd = newsdatan(s, n);
+        tp->next = tp->cb.fill;
+      }  
+      va_end(args);
+      return 0;
+    } break;
+    case CTLOP_CI: {
+      va_list args; va_start(args, tp);
+      va_end(args);
+      return (tp->flags & TIF_CI) != 0;
+    } break;
+    case CTLOP_SETCI: {
+      va_list args; int d; va_start(args, tp);
+      d = va_arg(args, int);
+      va_end(args);
+      if (d) tp->flags |= TIF_CI; else tp->flags &= ~TIF_CI;
+      return d != 0;
+    } break;
+    default: break;
+  }
+  return -1;
+}
+
+/* string input ports */
+
+sifile_t *sialloc(const char *p, int span, void *base) { 
+  sifile_t *fp = cxm_cknull(malloc(sizeof(sifile_t)), "malloc(sifile)");
+  fp->p = p; fp->e = p+span; fp->base = base; fp->flags = SIF_NONE; return fp; }
+
+static void sifree(sifile_t *fp) { 
+  assert(fp); if (fp->base) free(fp->base); free(fp); }
+
+static int sigetch(sifile_t *fp) {
+  int c; assert(fp && fp->p);
+  if (fp->p >= fp->e) return EOF; c = unextc(fp->p); return c; }
+
+static int siungetch(int c, sifile_t *fp) {
+  assert(fp && fp->p); --(fp->p); assert(c == *(fp->p)); return c; }
+
+static int sictl(ctlop_t op, sifile_t *sp, ...) {
+  switch (op) {
+    case CTLOP_RDLN: {
+      va_list args; int **pd; va_start(args, sp); 
+      pd = va_arg(args, int **);
+      if (*(sp->p) == 0) *pd = NULL;
+      else {
+        const char *s = strchr(sp->p, '\n');
+        if (s) { *pd = newsdatan(sp->p, (int)(s-sp->p)); sp->p = s+1; }
+        else { *pd = newsdata(sp->p); sp->p += strlen(sp->p); }
+      }  
+      va_end(args);
+      return 0;
+    } break;
+    case CTLOP_CI: {
+      va_list args; va_start(args, sp);
+      va_end(args);
+      return (sp->flags & SIF_CI) != 0;
+    } break;
+    case CTLOP_SETCI: {
+      va_list args; int d; va_start(args, sp);
+      d = va_arg(args, int);
+      va_end(args);
+      if (d) sp->flags |= SIF_CI; else sp->flags &= ~SIF_CI;
+      return d != 0;
+    } break;
+    default: break;
+  }
+  return -1;
+}
+
+/* bytevector input ports */
+
+bvifile_t *bvialloc(unsigned char *p, unsigned char *e, void *base) { 
+  bvifile_t *fp = cxm_cknull(malloc(sizeof(bvifile_t)), "malloc(bvifile)");
+  fp->s = fp->p = p; fp->e = e; fp->base = base; return fp; }
+
+static void bvifree(bvifile_t *fp) { 
+  assert(fp); if (fp->base) free(fp->base); free(fp); }
+
+static int bvigetch(bvifile_t *fp) {
+  assert(fp && fp->p && fp->e); return (fp->p >= fp->e) ? EOF : (0xff & *(fp->p)++); }
+
+static int bviungetch(int c, bvifile_t *fp) {
+  assert(fp && fp->p && fp->e); --(fp->p); assert(c == *(fp->p)); return c; }
+
+static int bvictl(ctlop_t op, bvifile_t *fp, ...) {
+  switch (op) {
+    case CTLOP_POS: {
+      va_list args; int64_t *ppos;
+      va_start(args, fp); ppos = va_arg(args, int64_t *); va_end(args);
+      if (!ppos) return 0; /* supported */
+      *ppos = (int64_t)(fp->p - fp->s);
+      return 0;
+    } break;
+    case CTLOP_SETPOS: {
+      va_list args; int64_t *ppos; int org; int64_t off, span;
+      va_start(args, fp); ppos = va_arg(args, int64_t *);
+      if (!ppos) { va_end(args); return 0; } /* supported */
+      org = va_arg(args, int); va_end(args);
+      off = *ppos;
+      span = (int64_t)(fp->e - fp->s);
+      /* checked before the origin is added, and why: notes.md [9] */
+      if (off > span || off < -span) return 2;
+      switch (org) {
+        case SEEK_SET: break;
+        case SEEK_CUR: off += (int64_t)(fp->p - fp->s); break;
+        case SEEK_END: off += span; break;
+        default: return 2;
+      }
+      if (off < 0 || off > span) return 2;
+      fp->p = fp->s + off;
+      return 0;
+    } break;
+    default: break;
+  }
+  return -1;
+}
+
+/* bytevector output ports */
+
+bvofile_t *bvoalloc(void) {
+  bvofile_t *fp = cxm_cknull(malloc(sizeof(bvofile_t)), "malloc(bvofile)");
+  cbinit(&fp->cb); fp->hwl = 0; return fp; }
+
+static void bvofree(bvofile_t *fp) {
+  if (fp) { free(fp->cb.buf); free(fp); } }
+
+size_t bvolen(bvofile_t *fp) {
+  size_t n; assert(fp); n = cblen(&fp->cb); return (fp->hwl > n) ? fp->hwl : n; }
+
+static int bvoctl(ctlop_t op, bvofile_t *fp, ...) {
+  switch (op) {
+    case CTLOP_POS: {
+      va_list args; int64_t *ppos;
+      va_start(args, fp); ppos = va_arg(args, int64_t *); va_end(args);
+      if (!ppos) return 0; /* supported */
+      *ppos = (int64_t)cblen(&fp->cb);
+      return 0;
+    } break;
+    case CTLOP_SETPOS: {
+      va_list args; int64_t *ppos; int org; int64_t off, len, cur;
+      va_start(args, fp); ppos = va_arg(args, int64_t *);
+      if (!ppos) { va_end(args); return 0; } /* supported */
+      org = va_arg(args, int); va_end(args);
+      off = *ppos;
+      len = (int64_t)bvolen(fp); cur = (int64_t)cblen(&fp->cb);
+      /* the port cannot be extended by seeking, so [0, len] is all there is */
+      if (off > len || off < -len) return 2;
+      switch (org) {
+        case SEEK_SET: break;
+        case SEEK_CUR: off += cur; break;
+        case SEEK_END: off += len; break;
+        default: return 2;
+      }
+      if (off < 0 || off > len) return 2;
+      if ((size_t)cur > fp->hwl) fp->hwl = (size_t)cur; /* keep the tail */
+      fp->cb.fill = fp->cb.buf + off;
+      return 0;
+    } break;
+    default: break;
+  }
+  return -1;
+}
+
+/* file output ports */
+
+static int fctl(ctlop_t op, FILE *fp, ...) {
+  switch (op) {
+    case CTLOP_OFL: {
+      fflush(fp);
+      return 0;
+    } break;
+    default: break;
+  }
+  return -1;
+}
+
+/* binary file ports, in and out; see notes.md [9] */
+
+static int bfctl(ctlop_t op, FILE *fp, ...) {
+  switch (op) {
+    case CTLOP_POS: {
+      va_list args; int64_t *ppos; fileoff_t off;
+      va_start(args, fp); ppos = va_arg(args, int64_t *); va_end(args);
+      if (!ppos) return 0; /* supported */
+      off = ftelloff(fp);
+      if (off < 0) return 1;
+      *ppos = (int64_t)off;
+      return 0;
+    } break;
+    case CTLOP_SETPOS: {
+      va_list args; int64_t *ppos; int org; int64_t off, lim;
+      va_start(args, fp); ppos = va_arg(args, int64_t *);
+      if (!ppos) { va_end(args); return 0; } /* supported */
+      org = va_arg(args, int); va_end(args);
+      off = *ppos;
+      if (org != SEEK_SET && org != SEEK_CUR && org != SEEK_END) return 2;
+      /* the one out-of-range position we can name unasked; notes.md [9] */
+      if (org == SEEK_SET && off < 0) return 2;
+      lim = FILEOFF_IMAX; /* via a variable: the test folds away on lp64 */
+      if (off > lim || off < -lim - 1) return 2;
+      return (fseekoff(fp, (fileoff_t)off, org) == 0) ? 0 : 1;
+    } break;
+    default: break;
+  }
+  return fctl(op, fp); /* CTLOP_OFL and the rest */
+}
+
+
+/* optional enhanced tty ports */
+#ifdef OPT_ENHTTY
+#include "opt/n_enhtty.h"
+#endif
+
+/* port type array */
+
+cxtype_port_t cxt_port_types[PORTTYPES_MAX] = {
+#define IPORT_CLOSED_PTINDEX     0
+  { "closed-input-port", (void (*)(void*))nofree, SPT_INPUT,
+    (int (*)(void*))nogetch, (int (*)(int, void*))noungetch,
+    (int (*)(int, void*))noputch, (int (*)(ctlop_t, void *, ...))noctl },
+#define IPORT_FILE_PTINDEX       1
+  { "file-input-port", (void (*)(void*))tifree, SPT_INPUT,
+    (int (*)(void*))tigetch, (int (*)(int, void*))tiungetch,
+    (int (*)(int, void*))noputch, (int (*)(ctlop_t, void *, ...))tictl },
+#define IPORT_BYTEFILE_PTINDEX   2
+  { "binary-file-input-port", ffree, SPT_INPUT|SPT_BINARY,
+    (int (*)(void*))(fgetc), (int (*)(int, void*))(ungetc),
+    (int (*)(int, void*))noputch, (int (*)(ctlop_t, void *, ...))bfctl },
+#define IPORT_STRING_PTINDEX     3
+  { "string-input-port", (void (*)(void*))sifree, SPT_INPUT,
+    (int (*)(void*))sigetch, (int (*)(int, void*))siungetch,
+    (int (*)(int, void*))noputch, (int (*)(ctlop_t, void *, ...))sictl },
+#define IPORT_BYTEVECTOR_PTINDEX 4
+  { "bytevector-input-port", (void (*)(void*))bvifree, SPT_INPUT|SPT_BINARY,
+    (int (*)(void*))bvigetch, (int (*)(int, void*))bviungetch,
+    (int (*)(int, void*))noputch, (int (*)(ctlop_t, void *, ...))bvictl },
+#define OPORT_CLOSED_PTINDEX     5
+  { "closed-output-port", (void (*)(void*))nofree, SPT_OUTPUT,
+    (int (*)(void*))nogetch, (int (*)(int, void*))noungetch,
+    (int (*)(int, void*))noputch, (int (*)(ctlop_t, void *, ...))noctl },
+#define OPORT_FILE_PTINDEX       6
+  { "file-output-port", ffree, SPT_OUTPUT,
+    (int (*)(void*))nogetch, (int (*)(int, void*))noungetch,
+    (int (*)(int, void*))(ufputc), (int (*)(ctlop_t, void *, ...))fctl },
+#define OPORT_BYTEFILE_PTINDEX   7
+  { "binary-file-output-port", ffree, SPT_OUTPUT|SPT_BINARY,
+    (int (*)(void*))nogetch, (int (*)(int, void*))noungetch,
+    (int (*)(int, void*))(fputc), (int (*)(ctlop_t, void *, ...))bfctl },
+#define OPORT_STRING_PTINDEX     8
+  { "string-output-port", (void (*)(void*))freecb, SPT_OUTPUT,
+    (int (*)(void*))nogetch, (int (*)(int, void*))noungetch,
+    (int (*)(int, void*))ucbputc, (int (*)(ctlop_t, void *, ...))noctl },
+#define OPORT_BYTEVECTOR_PTINDEX 9
+  { "bytevector-output-port", (void (*)(void*))bvofree, SPT_OUTPUT|SPT_BINARY,
+    (int (*)(void*))nogetch, (int (*)(int, void*))noungetch,
+    (int (*)(int, void*))cbputc, (int (*)(ctlop_t, void *, ...))bvoctl },
+#ifdef OPT_ENHTTY /* + tty */
+#define IPORT_TTY_PTINDEX 10
+  { "tty-input-port", (void (*)(void*))ttfree, SPT_INPUT,
+    (int (*)(void*))ttgetch, (int (*)(int, void*))ttungetch,
+    (int (*)(int, void*))noputch, (int (*)(ctlop_t, void *, ...))ttctl },
+#define OPORT_TTY_PTINDEX 11
+  { "tty-output-port", (void (*)(void*))ttfree, SPT_OUTPUT,
+    (int (*)(void*))nogetch, (int (*)(int, void*))noungetch,
+    (int (*)(int, void*))ttputch, (int (*)(ctlop_t, void *, ...))ttctl },
+#endif
+};
+
+cxtype_t *IPORT_CLOSED_NTAG = (cxtype_t *)&cxt_port_types[IPORT_CLOSED_PTINDEX];
+cxtype_t *IPORT_FILE_NTAG = (cxtype_t *)&cxt_port_types[IPORT_FILE_PTINDEX];
+cxtype_t *IPORT_BYTEFILE_NTAG = (cxtype_t *)&cxt_port_types[IPORT_BYTEFILE_PTINDEX];
+cxtype_t *IPORT_STRING_NTAG = (cxtype_t *)&cxt_port_types[IPORT_STRING_PTINDEX];
+cxtype_t *IPORT_BYTEVECTOR_NTAG = (cxtype_t *)&cxt_port_types[IPORT_BYTEVECTOR_PTINDEX];
+cxtype_t *OPORT_CLOSED_NTAG = (cxtype_t *)&cxt_port_types[OPORT_CLOSED_PTINDEX];
+cxtype_t *OPORT_FILE_NTAG = (cxtype_t *)&cxt_port_types[OPORT_FILE_PTINDEX];
+cxtype_t *OPORT_BYTEFILE_NTAG = (cxtype_t *)&cxt_port_types[OPORT_BYTEFILE_PTINDEX];
+cxtype_t *OPORT_STRING_NTAG = (cxtype_t *)&cxt_port_types[OPORT_STRING_PTINDEX];
+cxtype_t *OPORT_BYTEVECTOR_NTAG = (cxtype_t *)&cxt_port_types[OPORT_BYTEVECTOR_PTINDEX];
+#ifdef OPT_ENHTTY /* + tty */
+cxtype_t *IPORT_TTY_NTAG = (cxtype_t *)&cxt_port_types[IPORT_TTY_PTINDEX];
+cxtype_t *OPORT_TTY_NTAG = (cxtype_t *)&cxt_port_types[OPORT_TTY_PTINDEX];
+#endif
+
+/* circularity/sharing helpers */
+
+/* eq hash table for circular/sharing checks and safe equal? */
+typedef struct { obj *v; obj *r; size_t sz; size_t u, maxu, c; } stab_t;
+static stab_t *staballoc(void) {
+  stab_t *p = cxm_cknull(calloc(1, sizeof(stab_t)), "newstab");
+  p->v = cxm_cknull(calloc(64, sizeof(obj)), "newstab[1]");
+  p->sz = 64, p->maxu = 64 / 2; return p;
+}
+static stab_t *stabfree(stab_t *p) { 
+  if (p) { free(p->v); free(p->r); free(p); }
+  return NULL; 
+}
+static int stabnew(obj o, stab_t *p, int circ) {
+  if (!o || notaptr(o) || notobjptr(o) || (circ && isaptr(objptr_from_obj(o)[-1]))) return 0;
+  /* a closure is opaque; cell 0 is payload in an PACKED_MTAG block, not a tag */
+  else if (circ && obj_is_blkhdr(objptr_from_obj(o)[-1], CLOSURE_MTAG)) return 0;
+  else { /* v[i] is 0 or heap obj, possibly with lower bit set if it's not new */
+    unsigned long h = (unsigned long)o; size_t sz = p->sz, i, j;
+    for (i = h & (sz-1); p->v[i]; i = (i-1) & (sz-1))
+      if ((p->v[i] & ~1) == o) { p->v[i] |= 1; return 0; }
+    if (p->u == p->maxu) { /* rehash */
+      size_t nsz = sz * 2; obj *nv = cxm_cknull(calloc(nsz, sizeof(obj)), "stabnew");
+      for (i = 0; i < sz; ++i) if (p->v[i] & ~1) {
+        for (j = (unsigned long)(p->v[i] & ~1) & (nsz-1); nv[j]; j = (j-1) & (nsz-1)) ;
+        nv[j] = p->v[i];
+      }
+      free(p->v); p->v = nv; sz = p->sz = nsz; p->maxu = nsz / 2;
+      for (i = h & (sz-1); p->v[i]; i = (i-1) & (sz-1)) ;
+    }
+    p->v[i] = o; p->u += 1; return 1; 
+  }
+}
+static void stabdelifu(obj o, stab_t *p) { 
+  unsigned long h = (unsigned long)o; size_t sz = p->sz, i;
+  for (i = h & (sz-1); p->v[i]; i = (i-1) & (sz-1)) if ((p->v[i] & ~1) == o) { 
+    if (p->v[i] & 1) /* keep */; else p->v[i] = 1; /* del */
+    return;
+  }
+}
+static void stabpushp(obj o, stab_t *p) {
+  obj *r = p->r; if (!r) { p->r = r = cxm_cknull(calloc(sizeof(obj), 12), "stabpushp"); r[1] = 10; }
+  else if (r[0] == r[1]) { p->r = r = cxm_cknull(realloc(r, sizeof(obj)*(2+(size_t)r[1]*2)), "stabpushp"); r[1] *= 2; }
+  r[2 + r[0]++] = o; 
+}
+static void stabpopp(stab_t *p) {
+  obj *r = p->r; assert(r && r[0] > 0); r[0] -= 1;
+}
+static void stabcircular(obj o, stab_t *p) {
+  tail: if (stabnew(o, p, 1)) {
+    obj *op = objptr_from_obj(o), fo = op[-1];
+    if (notaptr(fo)) { 
+      obj *fop = op + size_from_obj(fo);
+      stabpushp(0, p); while (op+1 < fop) stabcircular(*op++, p); stabpopp(p); 
+      if (op+1 == fop) { stabpushp(o, p); o = *op; goto tail; }
+    } 
+  } else {
+    obj *r = p->r; if (r) {
+      obj *op = r+2, *fop = op+r[0];
+      while (fop > op && fop[-1] != 0) stabdelifu(*--fop, p); 
+      r[0] = fop - op;
+    }
+  }
+}
+static void stabshared(obj o, stab_t *p) {
+  tail: if (stabnew(o, p, 0)) {
+    obj *op = objptr_from_obj(o), fo = op[-1];
+    if (notaptr(fo)) { 
+      obj *fop = op + size_from_obj(fo); 
+      while (op+1 < fop) stabshared(*op++, p);
+      if (op+1 == fop) { o = *op; goto tail; }
+    } 
+  }
+}
+static stab_t *stabend(stab_t *p) {
+  size_t nz, i, sz = p->sz;
+  for (nz = i = 0; i < sz; ++i) if ((p->v[i] & ~1) && (p->v[i] & 1)) ++nz;
+  if (nz) {
+    size_t nsz, j; obj *nv; for (nsz = 8; nsz < nz*2; nsz *= 2) ;
+    nv = cxm_cknull(calloc(nsz, sizeof(obj)), "stabend");
+    for (i = 0; i < sz; ++i) if ((p->v[i] & ~1) && (p->v[i] & 1)) {
+      for (j = (unsigned long)(p->v[i] & ~1) & (nsz-1); nv[j]; j = (j-1) & (nsz-1)) ;
+      nv[j] = p->v[i];
+    }
+    free(p->v); p->v = nv; sz = p->sz = nsz; p->maxu = nsz / 2;
+    free(p->r); p->r = NULL;
+  } else p = stabfree(p);
+  return p;
+}
+static long stabri(size_t i, stab_t *p, int upd) {
+  obj *pri, ri; if (!p->r) p->r = cxm_cknull(calloc(p->sz, sizeof(obj)), "stabri");
+  pri = p->r + i; ri = *pri; if (!ri) *pri = ri = ++(p->c);
+  if (upd && ri > 0) *pri = -ri; return (long)ri;
+}
+static long stabref(obj o, stab_t *p, int upd) {
+  if (!p || !o || notaptr(o) || notobjptr(o)) return 0; else {
+    unsigned long h = (unsigned long)o; size_t sz = p->sz, i;
+    for (i = h & (sz-1); p->v[i]; i = (i-1) & (sz-1))
+      if ((p->v[i] & ~1) == o) return (p->v[i] & 1) ? stabri(i, p, upd) : 0; 
+    return 0;
+  }
+}
+static int stabufind(obj x, obj y, stab_t *p) {
+  size_t sz = p->sz, i, ix=0, iy=0; /* bogus 0 inits to silence gcc */ obj *r = p->r;
+  for (i = (unsigned long)x & (sz-1); p->v[i]; i = (i-1) & (sz-1)) if ((p->v[i] & ~1) == x) { ix = i; break; }
+  for (i = ix; r[i] >= 0; ) i = (size_t)r[i]; if (i != ix) ix = (size_t)(r[ix] = i);  
+  for (i = (unsigned long)y & (sz-1); p->v[i]; i = (i-1) & (sz-1)) if ((p->v[i] & ~1) == y) { iy = i; break; }
+  for (i = iy; r[i] >= 0; ) i = (size_t)r[i]; if (i != iy) iy = (size_t)(r[iy] = i);
+  if (ix == iy) return 1; /* same class, assumed to be equal */ 
+  if (r[ix] < r[iy]) { r[ix] += r[iy]; r[iy] = ix; } else { r[iy] += r[ix]; r[ix] = iy; } return 0;
+}
+static int stabequal(obj x, obj y, stab_t *p) {
+  obj h; int i, n; loop: if (x == y) return 1;
+  if (!x || !y || notaptr(x) || notaptr(y) || notobjptr(x) || notobjptr(y)) return 0;
+  if ((h = objptr_from_obj(x)[-1]) != objptr_from_obj(y)[-1]) return 0;
+#ifdef FLONUMS_BOXED
+  if (h == (obj)FLONUM_NTAG) return get_flobits(x) == get_flobits(y); 
+#endif
+#ifdef OPT_TOWER
+  if (h == (obj)BIGNUM_NTAG) return bneq(get_bignum(x), get_bignum(y));
+  if (h == (obj)FATNUM_NTAG) return fneqv(get_fatnum(x), get_fatnum(y));
+#endif
+  if (h == (obj)STRING_NTAG) return sdatacmp(string_data(x), string_data(y)) == 0;
+  if (h == (obj)BYTEVECTOR_NTAG) return bytevectoreq(bytevector_data(x), bytevector_data(y));
+  if (isaptr(h)) return 0;
+  n = size_from_obj(h);
+  /* a cell-less block, such as #(), is settled by the headers alone */
+  if (!n) return !obj_is_blkhdr(h, TYPED_MTAG);
+  /* cell 0 is the descriptor in an R block, and payload in any other kind */
+  i = obj_is_blkhdr(h, TYPED_MTAG) ? 1 : 0;
+  if (i && block_ref(x, 0) != block_ref(y, 0)) return 0;
+  if (stabufind(x, y, p)) return 1; /* seen before and decided to be equal */
+  for (; i < n-1; ++i) if (!stabequal(block_ref(x, i), block_ref(y, i), p)) return 0;
+  if (i == n-1) { x = block_ref(x, i); y = block_ref(y, i); goto loop; } else return 1;
+}
+static int boundequal(obj x, obj y, int fuel) { /* => remaining fuel or <0 on failure */
+  obj h; int i, n; loop: assert(fuel > 0); if (x == y) return fuel-1;
+  if (!x || !y || notaptr(x) || notaptr(y) || notobjptr(x) || notobjptr(y)) return -1;
+  if ((h = objptr_from_obj(x)[-1]) != objptr_from_obj(y)[-1]) return -1;
+#ifdef FLONUMS_BOXED
+  if (h == (obj)FLONUM_NTAG) return get_flobits(x) == get_flobits(y) ? fuel-1 : -1; 
+#endif
+#ifdef OPT_TOWER
+  if (h == (obj)BIGNUM_NTAG) return bneq(get_bignum(x), get_bignum(y)) ? fuel-1 : -1;
+  if (h == (obj)FATNUM_NTAG) return fneqv(get_fatnum(x), get_fatnum(y)) ? fuel-1 : -1;
+#endif
+  if (h == (obj)STRING_NTAG) return sdatacmp(string_data(x), string_data(y)) == 0 ? fuel-1 : -1;
+  if (h == (obj)BYTEVECTOR_NTAG) return bytevectoreq(bytevector_data(x), bytevector_data(y)) ? fuel-1 : -1;
+  if (isaptr(h)) return -1;
+  n = size_from_obj(h);
+  if (!n) return obj_is_blkhdr(h, TYPED_MTAG) ? -1 : fuel-1; /* #() and the like */
+  i = obj_is_blkhdr(h, TYPED_MTAG) ? 1 : 0;
+  if (i && block_ref(x, 0) != block_ref(y, 0)) return -1;
+  if (--fuel == 0) return 0; /* we must spend fuel while comparing objects themselves */
+  for (; i < n-1; ++i) if ((fuel = boundequal(block_ref(x, i), block_ref(y, i), fuel)) <= 0) return fuel;
+  if (i == n-1) { x = block_ref(x, i); y = block_ref(y, i); goto loop; } else return fuel;
+}
+
+/* base predicates */
+
+int is_circular(obj x) {
+  if (!x || notaptr(x) || notobjptr(x)) return 0;
+  else { stab_t *p = staballoc(); stabcircular(x, p); p = stabend(p); stabfree(p); return p != NULL; }
+}
+
+int iseqv(obj x, obj y) {
+  obj h; if (x == y) return 1;
+  if (!x || !y || notaptr(x) || notaptr(y) || notobjptr(x) || notobjptr(y)) return 0;
+  if ((h = objptr_from_obj(x)[-1]) != objptr_from_obj(y)[-1]) return 0;
+#ifdef FLONUMS_BOXED /* NB: compare as bits to make sure two nans are eqv */
+  if (h == (obj)FLONUM_NTAG) return get_flobits(x) == get_flobits(y); 
+#endif
+#ifdef OPT_TOWER
+  if (h == (obj)BIGNUM_NTAG) return bneq(get_bignum(x), get_bignum(y));
+  if (h == (obj)FATNUM_NTAG) return fneqv(get_fatnum(x), get_fatnum(y));
+#endif
+  return 0;
+}
+
+obj ismemv(obj x, obj l) {
+  if (!x || notaptr(x) || notobjptr(x)) {
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { if (pair_car(l) == x) return l; }
+  } else if (is_flonum(x)) {
+    flobits_t fx = get_flobits(x); 
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj y = pair_car(l); if (is_flonum(y) && fx == get_flobits(y)) return l; }
+#ifdef OPT_TOWER
+  } else if (is_bignum(x)) {
+    bignum_t *fx = get_bignum(x); 
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj y = pair_car(l); if (is_bignum(y) && bneq(fx, get_bignum(y))) return l; }
+  } else if (is_fatnum(x)) {
+    fatnum_t *fx = get_fatnum(x); 
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj y = pair_car(l); if (is_fatnum(y) && fneqv(fx, get_fatnum(y))) return l; }
+#endif
+  } else { /* for others, memv == memq */
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { if (pair_car(l) == x) return l; }
+  } return 0;
+}
+
+obj isassv(obj x, obj l) {
+  if (!x || notaptr(x) || notobjptr(x)) {
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj p = pair_car(l); if (pair_car(p) == x) return p; }
+  } else if (is_flonum(x)) {
+    flobits_t fx = get_flobits(x); 
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj p = pair_car(l), y = pair_car(p); if (is_flonum(y) && fx == get_flobits(y)) return p; }
+#ifdef OPT_TOWER
+  } else if (is_bignum(x)) {
+    bignum_t *fx = get_bignum(x); 
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj p = pair_car(l), y = pair_car(p); if (is_bignum(y) && bneq(fx, get_bignum(y))) return p; }
+  } else if (is_fatnum(x)) {
+    fatnum_t *fx = get_fatnum(x); 
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj p = pair_car(l), y = pair_car(p); if (is_fatnum(y) && fneqv(fx, get_fatnum(y))) return p; }
+#endif
+  } else { /* for others, assv == assq */
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj p = pair_car(l); if (pair_car(p) == x) return p; }
+  } return 0;
+}
+
+int isequal(obj x, obj y) {
+  stab_t *p; obj *r; size_t i; int res = boundequal(x, y, 500);
+  if (res != 0) return res > 0; /* small/non-circular/easy */
+  p = staballoc(); stabshared(x, p); stabshared(y, p);
+  r = p->r = cxm_cknull(calloc(p->sz, sizeof(obj)), "isequal");
+  for (i = 0; i < p->sz; ++i) if (p->v[i] & ~1) r[i] = -1; 
+  res = stabequal(x, y, p); stabfree(p); return res;
+}
+
+obj ismember(obj x, obj l) {
+  if (!x || notaptr(x) || notobjptr(x)) {
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { if (pair_car(l) == x) return l; }
+  } else if (is_flonum(x)) {
+    flobits_t fx = get_flobits(x); 
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj y = pair_car(l); if (is_flonum(y) && fx == get_flobits(y)) return l; }
+#ifdef OPT_TOWER
+  } else if (is_bignum(x)) {
+    bignum_t *fx = get_bignum(x); 
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj y = pair_car(l); if (is_bignum(y) && bneq(fx, get_bignum(y))) return l; }
+  } else if (is_fatnum(x)) {
+    fatnum_t *fx = get_fatnum(x); 
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj y = pair_car(l); if (is_fatnum(y) && fneqv(fx, get_fatnum(y))) return l; }
+#endif
+  } else if (is_string(x)) {
+    const int *xd = string_data(x);
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj y = pair_car(l); if (is_string(y) && 0 == sdatacmp(xd, string_data(y))) return l; }
+  } else {
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { if (isequal(pair_car(l), x)) return l; }
+  } return 0;
+}
+
+obj isassoc(obj x, obj l) {
+  if (!x || notaptr(x) || notobjptr(x)) {
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj p = pair_car(l); if (pair_car(p) == x) return p; }
+  } else if (is_flonum(x)) {
+    flobits_t fx = get_flobits(x); 
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj p = pair_car(l), y = pair_car(p); if (is_flonum(y) && fx == get_flobits(y)) return p; }
+#ifdef OPT_TOWER
+  } else if (is_bignum(x)) {
+    bignum_t *fx = get_bignum(x); 
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj p = pair_car(l), y = pair_car(p); if (is_bignum(y) && bneq(fx, get_bignum(y))) return p; }
+  } else if (is_fatnum(x)) {
+    fatnum_t *fx = get_fatnum(x); 
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj p = pair_car(l), y = pair_car(p); if (is_fatnum(y) && fneqv(fx, get_fatnum(y))) return p; }
+#endif
+  } else if (is_string(x)) {
+    const int *xd = string_data(x);
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj p = pair_car(l), y = pair_car(p); if (is_string(y) && 0 == sdatacmp(xd, string_data(y))) return p; }
+  } else {
+    for (; l != null_obj(); l = pair_cdr(l)) 
+      { obj p = pair_car(l); if (isequal(pair_car(p), x)) return p; }
+  } return 0;
+}
+
+/* common syntax data */
+
+static int is_delimiter(int c) {
+  switch (c) {
+    case '\t': case '\r': case '\n': case ' ':
+    case '(':  case ')':  case '[':  case ']':
+    case '|':  case '\"': case ';':  case EOF:
+      return 1;
+  }
+#ifdef OPT_UNICODE
+  return (!uisspace(c));
+#else
+  return 0;
+#endif
+}
+
+/* read */
+
+/* internal numsym reader */
+char *rdns(int (*in_getc)(void*), int (*in_ungetc)(int, void*), void *in, cbuf_t *pcb)
+{
+  int c = in_getc(in);
+  while (isnumsym(c)) { ucbputc(c, pcb); c = in_getc(in); }
+  in_ungetc(c, in);
+  return cbdata(pcb);
+} 
+
+/* internal read-ahead procedure; returns 'o', 'i', 'e', 0, 1, 2 */
+int rdah(int fold, int (*in_getc)(void*), int (*in_ungetc)(int, void*), 
+         void *in, obj *po, fatnum4_t *pf, int **pp) 
+{
+  int c, xc; cbuf_t *pcb; char *s; unsigned char *b; 
+next: 
+  switch (c = in_getc(in)) {
+    case EOF:  return *po = eof_obj(), 'o';
+    case '(':  case ')': case '[': case ']':
+    case '\'': case '`': case ',': case '\"': case '|':
+    case '\\': case '{': case '}':  
+      return *po = char_obj(c), 'o';
+    case ';':  goto in_linecomm;
+    case '#':  goto in_hash;
+    default:   
+    if ((c >= '\t' && c <= '\n') || (c >= '\f' && c <= '\r') || c == ' ') goto in_whitespace;
+    if (isnumsym(c)) goto in_numsym;
+    in_ungetc(c, in); goto err;
+  }
+in_whitespace: 
+  c = in_getc(in);
+  if (c == EOF) return *po = eof_obj(), 'o';
+  if ((c >= '\t' && c <= '\n') || (c >= '\f' && c <= '\r') || c == ' ') goto in_whitespace;
+  in_ungetc(c, in); goto next;
+in_linecomm:
+  c = in_getc(in);
+  if (c == EOF) return *po = eof_obj(), 'o';
+  if (c != '\n') goto in_linecomm;
+  goto next;
+in_hash:
+  c = in_getc(in); if (c != EOF) in_ungetc(c, in); /* peek */
+  if (c == '*') { in_getc(in); goto in_bitvec; }
+  if (strchr("bodxieBODXIE", c) == NULL) return *po = char_obj('#'), 'o';
+  c = '#'; /* fall through */
+in_numsym:
+  pcb = newcb();
+  while (isnumsym(c) || c == '#') { ucbputc(c, pcb); c = in_getc(in); }
+  if (c != EOF) in_ungetc(c, in); if (!is_delimiter(c)) return freecb(pcb), 1; 
+  if (cleansymname((s = cbdata(pcb)), (int)cblen(pcb))) {
+    int *d = newsdatan(s, (int)cblen(pcb));
+    if (fold) { int *d1 = mapsdata(d, utofold); free(d); d = d1; }
+    *po = symbol_obj(internsdata(d, 0)); xc = 'o';
+  } else if (s[0] == '.' && s[1] == 0) {
+    *po = char_obj('.'); xc = 'o';
+  } else { 
+    switch (strtonum4(pf, cbdata(pcb), NULL, 10)) {
+      case NUMT_FIX: xc = 'e'; break;
+      case NUMT_FLO: xc = 'i'; break;
+#ifdef OPT_TOWER
+      case NUMT_BIG: xc = 'g'; break;
+      case NUMT_NONE: xc = 0; break;
+      /* fat numbers are the default */
+      default: xc = 'f'; break;
+#else
+      /* no big/fat numbers here */
+      default: xc = 0; break;
+#endif
+    }
+  }
+  freecb(pcb); return xc; /* 'o', 'i', 'e', or 0 */
+in_bitvec:
+  pcb = newcb(); c = in_getc(in);
+  while (c == '0' || c == '1') { cbputc(c, pcb); c = in_getc(in); }
+  if (c != EOF) in_ungetc(c, in); if (!is_delimiter(c)) return freecb(pcb), 1; 
+  xc = (int)cblen(pcb); *pp = makebytevector((xc+7)/8, 0); bvdatatype(*pp) = 32+xc%8;
+  for (s = cbdata(pcb), c = 0, b = bvdatabytes(*pp); c < xc; ++c, ++s) {
+    unsigned char *pb = b+c/8; int m = 1 << (c%8);
+    if (*s == '1') *pb |= m; else *pb &= ~m;
+  }
+  freecb(pcb); return 'b';
+err:
+  return 2;
+}
+
+/* write */
+
+/* internal recursive write procedure */
+typedef struct { stab_t *pst; int disp; cxtype_oport_t *vt; void *pp; } wenv_t;
+static void wrc(int c, wenv_t *e) { e->vt->putch(c, e->pp); }
+static void wrs(const char *s, wenv_t *e) {
+  cxtype_oport_t *vt = e->vt; void *pp = e->pp;
+  assert(vt); while (*s) vt->putch(unextc(s), pp);
+}
+static void wrsn(const char *s, int spn, wenv_t *e) {
+  cxtype_oport_t *vt = e->vt; void *pp = e->pp; const char *es = s + spn;
+  /* todo: would be *much* faster if we had vt->putn (aka write) */
+  assert(vt); while (s < es) vt->putch(unextc(s), pp);
+}
+static void wrd(double d, int prc, wenv_t *e) {
+  char buf[DN_MAX_BUFSIZE], *s;
+  s = dntostr(buf, DN_MAX_BUFSIZE, d, 10, 'g', prc);
+  assert(s == buf);
+  wrs(buf, e);
+}
+static void wrdatum(obj o, wenv_t *e) {
+  long ref;
+  tail: ref = stabref(o, e->pst, 1); /* update ref after access */
+  if (ref < 0) { char buf[30]; sprintf(buf, "#%ld#", -ref-1); wrs(buf, e); return; }
+  if (ref > 0) { char buf[30]; sprintf(buf, "#%ld=", +ref-1); wrs(buf, e); }
+  if (is_bool(o)) {
+    wrs(get_bool(o) ? "#t" : "#f", e);
+  } else if (is_fixnum(o)) {
+    char buf[30]; sprintf(buf, "%ld", get_fixnum(o)); wrs(buf, e);
+  } else if (is_flonum(o)) {
+    wrd(get_flonum(o), -1, e); /* use 'natural' precision */
+#ifdef OPT_TOWER
+  } else if (is_bignum(o)) {
+    wrbn(get_bignum(o), 10, e->vt->putch, e->pp);
+  } else if (is_fatnum(o)) {
+    wrfn(get_fatnum(o), 10, 0, -1, e->vt->putch, e->pp);
+#endif
+  } else if (is_eof(o)) {
+    wrs("#<eof>", e);
+  } else if (is_void(o)) {
+    wrs("#<void>", e);
+  } else if (is_shebang(o)) {
+    const char *s = symbolname(get_shebang(o));
+    wrs("#<!", e); wrs(s, e); wrc('>', e);
+  } else if (is_unit(o)) {
+    wrs("#<values>", e);
+  } else if (is_iport(o)) {
+    char buf[60]; sprintf(buf, "#<%s>", ckiportvt(o)->tname); wrs(buf, e);
+  } else if (is_oport(o)) {
+    char buf[60]; sprintf(buf, "#<%s>", ckoportvt(o)->tname); wrs(buf, e);
+  } else if (is_symbol(o)) {
+    const int *d = symsdata(get_symbol(o)); int n = sdatacspan(d);
+    const char *s = sdatachars(d);
+    if (e->disp || cleansymname(s, n)) wrsn(s, n, e);
+    else { 
+      n = sdatalen(d);
+      wrc('|', e);
+      while (n-- > 0) {
+        int c = unextc(s);
+        switch(c) {
+          case 0x00: wrs("\\x0;", e); break;
+          case '\t': wrs("\\t", e); break;
+          case '\n': wrs("\\n", e); break;
+          case '\r': wrs("\\r", e); break;
+          case '|' : wrs("\\|", e); break;
+          case '\\': wrs("\\\\", e); break;
+          default: wrc(c, e); break;
+        }
+      }
+      wrc('|', e);
+    }
+  } else if (is_null(o)) {
+    wrs("()", e);
+  } else if (is_pair(o)) {
+    wrc('(', e); wrdatum(pair_car(o), e);
+    while (is_pair(pair_cdr(o)) && !stabref(pair_cdr(o), e->pst, 0)) { wrc(' ', e); o = pair_cdr(o);  wrdatum(pair_car(o), e); }
+    if (!is_null(pair_cdr(o))) { wrs(" . ", e); wrdatum(pair_cdr(o), e); }
+    wrc(')', e);
+  } else if (is_char(o)) {
+    int c = get_char(o);
+    if (e->disp) wrc(c, e);
+    else switch(c) {
+      case 0x00: wrs("#\\null", e); break;
+      case 0x07: wrs("#\\alarm", e); break;
+      case 0x08: wrs("#\\backspace", e); break;
+      case 0x7f: wrs("#\\delete", e); break;
+      case 0x1b: wrs("#\\escape", e); break;
+      case '\t': wrs("#\\tab", e); break;
+      case '\n': wrs("#\\newline", e); break;
+      case '\r': wrs("#\\return", e); break;
+      case ' ': wrs("#\\space", e); break;
+      default: wrs("#\\", e); wrc(c, e); break;
+    }
+  } else if (is_string(o)) {
+    const int *d = string_data(o), n = sdatacspan(d);
+    const char *s = sdatachars(d), *es = s + n;
+    if (e->disp) wrsn(s, n, e);
+    else {
+      wrc('\"', e);
+      while (s < es) {
+        int c = unextc(s);
+        switch (c) {
+          case 0x00: wrs("\\x0;", e); break;
+          case '\t': wrs("\\t", e); break;
+          case '\n': wrs("\\n", e); break;
+          case '\r': wrs("\\r", e); break;
+          case '\"': wrs("\\\"", e); break;
+          case '\\': wrs("\\\\", e); break;
+          default: wrc(c, e); break;
+        }
+      }
+      wrc('\"', e);
+    }
+  } else if (is_vector(o)) {
+    int i, n = vector_len(o);
+    wrs("#(", e);
+    for (i = 0; i < n; ++i) { 
+      if (i) wrc(' ', e); wrdatum(vector_ref(o, i), e); 
+    }
+    wrc(')', e);
+  } else if (is_bytevector(o) && (bytevector_type(o) &~ 7) == 32) {
+    int i, n = bytevector_len(o), t = bytevector_type(o);
+    wrs("#*", e); if (n > 0) {
+      int bitl = ((t&7) ? (n-1)*8 + (t&7) : n*8);
+      unsigned char *pb = bytevector_refp(o, 0);
+      for (i = 0; i < bitl; ++i) {
+        int m = 1 << (i%8);
+        wrc(((int)(*pb) & m) ? '1' : '0', e);
+        if (i%8 == 7) ++pb;
+      }
+    }
+  } else if (is_bytevector(o)) {
+    int i, n = bytevector_len(o), t = bytevector_type(o), sz = 1;
+    char buf[60]; 
+    switch (t) {
+      default: case 0:  wrs("#u8(", e); break;
+      case 1:  wrs("#s8(", e); break;
+      case 2:  wrs("#u16(", e); sz = 2; break;
+      case 3:  wrs("#s16(", e); sz = 2; break;
+#ifdef OPT_TOWER
+      case 4:  wrs("#u32(", e); sz = 4; break;
+      case 5:  wrs("#s32(", e); sz = 4; break;
+      case 6:  wrs("#u64(", e); sz = 8; break;
+      case 7:  wrs("#s64(", e); sz = 8; break;
+#endif      
+      case 10: wrs("#f32(", e); sz = sizeof(float); break;
+      case 11: wrs("#f64(", e); sz = sizeof(double); break;
+#ifdef OPT_TOWER
+      case 14: wrs("#c64(", e); sz = sizeof(float)*2; break;
+      case 15: wrs("#c128(", e); sz = sizeof(double)*2; break;
+#endif      
+    }
+    for (i = 0; i < n; i += sz) {
+      unsigned char *p = bytevector_refp(o, i); 
+      if (i) wrc(' ', e);
+      switch (t) {
+        default: case 0: sprintf(buf, "%d", (int)*p);           wrs(buf, e); break; 
+        case 1:  sprintf(buf, "%d", (int)*(signed char *)p);    wrs(buf, e); break; 
+        case 2:  sprintf(buf, "%d", (int)*(unsigned short *)p); wrs(buf, e); break; 
+        case 3:  sprintf(buf, "%d", (int)*(signed short *)p);   wrs(buf, e); break; 
+#ifdef OPT_TOWER
+        case 4:  sprintf(buf, "%u", *(uint32_t *)p); wrs(buf, e); break; 
+        case 5:  sprintf(buf, "%d", *(int32_t *)p);  wrs(buf, e); break; 
+        case 6:  sprintf(buf, "%"PRIu64, *(uint64_t *)p); wrs(buf, e); break; 
+        case 7:  sprintf(buf, "%"PRId64, *(int64_t *)p);  wrs(buf, e); break; 
+#endif 
+        case 10: wrd((double)*(float *)p, FLT_DECIMAL_DIG, e); break; /* shorten */
+        case 11: wrd((double)*(double *)p, -1, e); break; /* 'natural' precision */
+#ifdef OPT_TOWER
+        case 14: case 15: {
+          int prc; fatnum4_t fn4; fn4.t = NUMT_MKCOM(NUMT_FLO, NUMT_FLO);
+          fn4.p[0].flo = (t == 14) ? (double)((float *)p)[0] : ((double *)p)[0];
+          fn4.p[2].flo = (t == 14) ? (double)((float *)p)[1] : ((double *)p)[1];
+          prc = (t == 14) ? FLT_DECIMAL_DIG : DBL_DECIMAL_DIG;
+          wrfn((fatnum_t*)&fn4, 10, 0, prc, e->vt->putch, e->pp);
+        } break;
+#endif      
+      }
+    }
+    wrc(')', e);
+  } else if (is_box(o)) {
+    wrs("#&", e); o = box_ref(o); goto tail;
+  } else if (is_tuple(o)) {
+    int i, n = tuple_len(o);
+    wrs("#<values", e);
+    for (i = 0; i < n; ++i) {
+      wrc(' ', e); wrdatum(tuple_ref(o, i), e);
+    }
+    wrc('>', e);
+  } else if (is_procedure(o)) {
+    char buf[60];
+    sprintf(buf, "#<procedure @%p>", (void*)objptr_from_obj(o));
+    wrs(buf, e);
+  } else if (isaptr(o) && !isobjptr(o)) {
+    /* an aligned pointer that is not in the heap: an instruction word, which
+     * instruction-table hands out on purpose. It used to print as a procedure,
+     * back when the procedure test counted anything outside the heap as one. */
+    char buf[60];
+    sprintf(buf, "#<instruction @%p>", (void*)objptr_from_obj(o));
+    wrs(buf, e);
+  } else if (is_typed(o)) {
+    int i, n = record_len(o);
+    wrs("#<record ", e);
+    wrdatum(record_rtd(o), e);
+    for (i = 0; i < n; ++i) { 
+      wrc(' ', e); wrdatum(record_ref(o, i), e); 
+    }
+    wrc('>', e);
+  } else {
+    wrs("#<unknown>", e);
+  }
+}
+
+/* S-expression writers */
+void oportputsimple(obj x, obj p, int disp) {
+  wenv_t e; e.pst = NULL; e.disp = disp; e.vt = oportvt(p); e.pp = oportdata(p);
+  wrdatum(x, &e);
+}
+void oportputcircular(obj x, obj p, int disp) {
+  wenv_t e; e.pst = staballoc(); e.disp = disp; e.vt = oportvt(p); e.pp = oportdata(p);
+  stabcircular(x, e.pst); e.pst = stabend(e.pst);
+  wrdatum(x, &e);
+  stabfree(e.pst);
+}
+void oportputshared(obj x, obj p, int disp) {
+  wenv_t e; e.pst = staballoc(); e.disp = disp; e.vt = oportvt(p); e.pp = oportdata(p);
+  stabshared(x, e.pst); e.pst = stabend(e.pst);
+  wrdatum(x, &e);
+  stabfree(e.pst);
+}
+
+
+/* double <-> string conversions */
+
+/* convert char to integer for any radix up to 16 */
+static int char_to_val(int c, unsigned radix) 
+{
+  int d = -1;
+  if (c >= '0' && c <= '9') d = c - '0';
+  else if (c >= 'a' && c <= 'f') d = c - 'a' + 10;
+  else if (c >= 'A' && c <= 'F') d = c - 'A' + 10;
+  return (d >= 0 && (unsigned)d < radix) ? d : -1;
+}
+
+/* convert bin/qua/oct/hex floating-point notation to double
+ * bbits: bits per mantissa digit (1=bin, 2=qua, 3=oct, 4=hex)
+ * 'e' (ebase = eradix = 1<<bbits) or 'p' (ebase = 2, eradix = 10) */
+double po2b_atod(const char *s, char **endp, unsigned bbits) 
+{
+  const char *p = s; uint64_t sig = 0; double d;
+  int neg, dotpos = -1, ndigits = 0, hxcount = 0, echar; 
+  int first_digit_idx = -1, first_digit_val = 0, sticky = 0;
+  long pexp = 0; unsigned base = 1 << bbits;
+
+  while (isspace((unsigned char)*p)) ++p;
+  neg = (*p == '-');
+  if (*p == '-' || *p == '+') ++p;
+
+  /* parse mantissa */
+  for (;; ++p) {
+    int c = (unsigned char)*p;
+    int d = (c == '.' && dotpos < 0) ? -2 : char_to_val(c, base);
+    if (d == -1) break; /* not a valid digit */
+    if (d == -2) { dotpos = ndigits; continue; }
+    if (d != 0 || first_digit_idx >= 0) {
+      if (first_digit_idx < 0) {
+        first_digit_idx = ndigits;
+        first_digit_val = d;
+      }
+      /* keep as many digits as fits in 60 bits to prevent uint64_t overflow */
+      if ((hxcount + 1) * bbits <= 60) {
+        sig = (sig << bbits) | (unsigned)d;
+        hxcount++;
+      } else if (d > 0) {
+        sticky = 1;
+      }
+    }
+    ++ndigits;
+  }
+
+  if (ndigits == 0) {
+    if (endp) *endp = (char *)s;
+    errno = EDOM; return 0.0;
+  }
+  if (dotpos < 0) dotpos = ndigits;
+
+  /* parse exponent */
+  echar = tolower((unsigned char)*p);
+  if (echar == 'e' || echar == 'p') {
+    const char *r = p + 1;
+    int pneg = (*r == '-');
+    unsigned eradix = (echar == 'p') ? 10 : base;
+    if (*r == '-' || *r == '+') r++;
+    if (char_to_val(*r, eradix) >= 0) {
+      pexp = 0;
+      while (1) {
+        int d = char_to_val(*r, eradix);
+        if (d < 0) break;
+        if (pexp < 1000000) pexp = pexp * eradix + d;
+        ++r;
+      }
+      if (pneg) pexp = -pexp;
+      p = r;
+    }
+  }
+  if (endp) *endp = (char *)p;
+
+  if (first_digit_idx < 0) { 
+    return neg ? -0.0 : 0.0;
+  } else {
+    int msb_offset = 0;
+    int temp_v = first_digit_val;
+    int target_bits, shift, round_bit;
+    long ldx, exp_msb, binary_pexp;
+
+    /* MSB offset within the first digit (e.g., octal '7' is 2, binary '1' is 0) */
+    while (temp_v >>= 1) ++msb_offset;
+    /* calculate binary weight */
+    binary_pexp = (echar == 'p') ? pexp : pexp * (long)bbits;
+    ldx = binary_pexp + (long)(dotpos - 1 - first_digit_idx) * (long)bbits;
+    ldx -= (long)(hxcount - 1) * (long)bbits;
+    /* binary weight of the MSB */
+    exp_msb = ldx + (long)(hxcount - 1) * (long)bbits + msb_offset;
+
+    /* determine precision (IEEE 754 double) */
+    if (exp_msb >= (long)DBL_MIN_EXP - 1) {
+      target_bits = DBL_MANT_DIG;
+    } else {
+      target_bits = (int)(exp_msb - (long)(DBL_MIN_EXP - DBL_MANT_DIG - 1));
+      if (target_bits < 0) target_bits = 0;
+    }
+
+    /* rounding logic (RNE) */
+    /* total bits currently in sig: (digits - 1)*bbits + (msb_offset + 1) */
+    shift = ((hxcount - 1) * bbits + msb_offset + 1) - target_bits;
+    if (shift > 0) {
+      if (shift >= 64) {
+        sticky |= (sig != 0);
+        sig = 0; round_bit = 0;
+      } else {
+        sticky |= ((sig & ((UINT64_C(1) << (shift - 1)) - 1)) != 0);
+        round_bit = (int)((sig >> (shift - 1)) & 1);
+        sig >>= shift;
+      }
+      if (round_bit && (sticky || (sig & 1))) {
+        sig++;
+        if (target_bits > 0 && (sig >= (UINT64_C(1) << target_bits))) {
+          sig >>= 1; ldx++;
+        }
+      }
+      ldx += shift;
+    } else if (shift < 0) {
+      sig <<= -shift;
+      ldx += shift;
+    }
+
+    /* result */
+    d = ldexp((double)sig, (int)ldx);
+    if (d <= -HUGE_VAL || d >= HUGE_VAL) errno = ERANGE;
+    else if (d == 0.0) errno = ERANGE; /* subnormal underflow */
+    return neg ? -d : d;
+  }
+}
+
+/* derived constants for buffer safety */
+/* binary (bbits=1) is the worst case for digit count: DBL_MANT_DIG = 53 */
+#define GN_DIG_MAX (1 + (DBL_MANT_DIG - 1) + 4)
+/* buffer must handle the worst-case scenario (binary, right before f->g switch) */
+#define GN_BUFSIZE (DBL_MANT_DIG + GN_DIG_MAX + 32)
+
+static int gn_digit(int x) { return (char)(x < 10 ? ('0' + x) : ('A' + (x - 10))); }
+
+/* render the exponent in a specific radix (2 to 16) */
+static char *render_exp(long val, unsigned radix, char *out) 
+{
+  char tmp[64];
+  int i = 0, j = 0, neg = 0;
+  if (val < 0) { neg = 1; val = -val; }
+  do { tmp[i++] = gn_digit(val % radix); val /= radix; } while (val > 0);
+  if (neg) out[j++] = '-';
+  while (i > 0) out[j++] = tmp[--i];
+  out[j] = '\0';
+  return out;
+}
+
+/* convert double to bin/qua/oct/hex floating-point notation
+ * bbits: 1 (bin), 2 (qua), 3 (oct), 4 (hex)
+ * echar: 'e' (base^exp) or 'p' (2^exp); eradix: depends on echar
+ * mode: 'e', 'f', 'g', or 'a' ('a' is a variant of 'e' for hex printing)
+ * prc: precision (used for rounding, not for adding trailing zeroes) */
+char *po2b_dtoa(double x, char *buf, size_t buflen, unsigned bbits, int echar, int mode, int prc) 
+{
+  double f, adj;
+  int neg, e, rem, i, pos, ndig;
+  unsigned base = 1 << bbits;
+  int dig[GN_DIG_MAX], last_nz;
+  int len_std, len_shift, shift, fixed;
+  long bin_exp_at_dot;
+  char exp_part[64], val_part[64];
+
+  assert(buflen >= GN_BUFSIZE);
+  assert(bbits >= 1 && bbits <= 4);
+
+  if (x != x || x >= HUGE_VAL || x <= -HUGE_VAL) return NULL;
+  if (x < 0.0 || (x == 0.0 && 1.0/x < 0.0)) { neg = 1; x = -x; } 
+  else neg = 0;
+  if (x == 0.0) { strcpy(buf, neg ? "-0.0" : "0.0"); return buf; }
+
+  f = frexp(x, &e);
+
+  /* normalize leading digit */
+  if (mode == 'a' && bbits == 4) {
+    /* special %a-like hex printing */
+    if (e < DBL_MIN_EXP) { /* denormal case: l.d. is 0 */
+      rem = e - (DBL_MIN_EXP-1); 
+    } else { /* normal case: leading digit is 1 */
+      rem = 1; 
+    }
+  } else {
+    /* normalize leading digit to be in [1, 2^bbits) */
+    rem = e % (int)bbits;
+    if (rem <= 0) rem += bbits;
+  }
+
+  adj = ldexp(f, rem);
+  bin_exp_at_dot = (long)e - rem;
+  
+  if (mode == 'f') { /* switch to g if out of safe f range */
+    long emin = -DBL_MANT_DIG, emax = DBL_MANT_DIG;
+    if (bin_exp_at_dot < emin || bin_exp_at_dot > emax) mode = 'g';
+  }
+  
+  /* exp at dot in terms of bbit digits */
+  shift = (int)(bin_exp_at_dot / (long)bbits);
+
+  /* NB: leading dig holds 'rem' bits, calc total count */
+  ndig = 1 + (DBL_MANT_DIG - rem + bbits - 1) / bbits;
+  assert(ndig <= GN_DIG_MAX);
+
+  /* extract digits */
+  for (i = 0; i < GN_DIG_MAX; ++i) dig[i] = 0;
+  for (i = 0; i < ndig; ++i) {
+    int d = (int)adj;
+    dig[i] = d;
+    adj = ldexp(adj - (double)d, bbits);
+  }
+
+  /* optional nearest, ties-to-even rounding */
+  if (prc >= 0) {
+    int rnd_idx;
+    if (mode == 'f') rnd_idx = shift + prc + 1;
+    else if (mode == 'e' || mode == 'a') rnd_idx = prc + 1;
+    else /* 'g' */ rnd_idx = prc > 0 ? prc : 1;
+    /* normal rounding region: rnd_idx inside digit array */
+    if (rnd_idx > 0 && rnd_idx < ndig) {
+      int round_digit = dig[rnd_idx];
+      int half = base >> 1;
+      int is_half = (round_digit == half);
+      int round_up = 0;
+      /* check if the tail is exactly half */
+      if (is_half) {
+        for (i = rnd_idx+1; i < ndig; ++i) {
+          if (dig[i] != 0) { is_half = 0; break; }
+        }
+      }
+      /* decide rounding direction */
+      if (round_digit > half) {
+        round_up = 1; /* strictly greater than half */
+      } else if (is_half) {
+        /* ties-to-even: check previous digit */
+        if ((dig[rnd_idx-1] & 1) != 0)
+          round_up = 1; /* previous digit is odd */
+      }
+      if (round_up) { /* propagate carry */
+        for (i = rnd_idx-1; i >= 0; --i) {
+          dig[i]++;
+          if (dig[i] < (int)base) break;
+          dig[i] = 0;
+        }
+        if (i < 0) { /* overflow past leading digit */
+          dig[0] = 1;
+          bin_exp_at_dot += bbits;
+          ++shift;
+        }
+      }
+      ndig = rnd_idx;
+    } else if (rnd_idx <= 0) { /* tiny magnitude case */
+      int half = base >> 1;
+      int round_up = 0;
+      if (rnd_idx == 0) {
+        if (dig[0] > half) {
+          round_up = 1;
+        } else if (dig[0] == half) {
+          for (i = 1; i < ndig; ++i) {
+            if (dig[i] != 0) { round_up = 1; break; }
+          }
+        }
+      }
+      if (round_up) { 
+        /* round up to smallest printable unit */
+        dig[0] = 1;
+        bin_exp_at_dot = (long)(-prc) * bbits;
+        shift = -prc;
+        ndig = 1;
+      } else {
+        /* round down to zero */
+        strcpy(buf, neg ? "-0.0" : "0.0");
+        return buf;
+      }
+    }
+  }
+
+  /* trim trailing zeroes */
+  last_nz = ndig - 1;
+  while (last_nz > 0 && dig[last_nz] == 0) --last_nz;
+
+  /* prepare exponent string */
+  exp_part[0] = echar;
+  if (echar == 'p') {
+    /* 'p' format always uses decimal binary exponent */
+    sprintf(exp_part + 1, "%ld", bin_exp_at_dot); /* drop + for consistency */
+  } else {
+    /* 'e' format uses base-radix exponent */
+    long base_exp = bin_exp_at_dot / (long)bbits;
+    render_exp(base_exp, base, val_part); /* does not print '+' */
+    strcpy(exp_part + 1, val_part);
+  }
+
+  /* standard form length: "D.FFFF" + exp_part */
+  if (last_nz == 0) len_std = 1 + (int)strlen(exp_part);
+  else len_std = 1 + 1 + last_nz + (int)strlen(exp_part);
+  /* we 'pessimize' len_std to widen the 'fixed' range */
+  len_std += (bin_exp_at_dot >= 0) ? 3 : 2; /* as if '+' is there */
+
+  /* shifted form length */
+  if (shift >= 0) {
+    int digits_before_dot = shift + 1;
+    int digits_after_dot = (last_nz > shift) ? (last_nz - shift) : 1;
+    len_shift = digits_before_dot + 1 + digits_after_dot;
+  } else {
+    int abs_shift = -shift;
+    len_shift = 2 + (abs_shift - 1) + (last_nz + 1);
+  }
+
+  pos = 0;
+  if (neg) buf[pos++] = '-';
+
+  if (mode == 'f') fixed = 1;
+  else if (mode == 'e' || mode == 'a') fixed = 0;
+  else fixed = (len_shift <= len_std);
+
+  if (fixed) {
+    if (shift >= 0) {
+      for (i = 0; i <= shift || i <= last_nz; i++) {
+        buf[pos++] = gn_digit(i < GN_DIG_MAX ? dig[i] : 0);
+        if (i == shift) buf[pos++] = '.';
+      }
+      if (buf[pos-1] == '.') buf[pos++] = '0';
+    } else {
+      int abs_shift = -shift;
+      buf[pos++] = '0'; buf[pos++] = '.';
+      for (i = 0; i < abs_shift - 1; i++) buf[pos++] = '0';
+      for (i = 0; i <= last_nz; i++) buf[pos++] = gn_digit(dig[i]);
+    }
+    buf[pos] = '\0';
+  } else {
+    buf[pos++] = gn_digit(dig[0]);
+    if (last_nz > 0) {
+      buf[pos++] = '.';
+      for (i = 1; i <= last_nz; i++) buf[pos++] = gn_digit(dig[i]);
+    }
+    buf[pos] = '\0';
+    strcat(buf, exp_part);
+  }
+
+  assert(strlen(buf) < buflen);
+  return buf;
+}
+
+/* double <-> string conversions */
+
+/* clears errno and sets it to EDOM or ERANGE on error */
+double strtodn(const char *str, int radix, char **ep)
+{
+  double x; char *e = (char *)str; errno = 0;
+  switch (radix) {
+    case 2:  x = po2b_atod(str, &e, 1); break;
+    case 4:  x = po2b_atod(str, &e, 2); break;
+    case 8:  x = po2b_atod(str, &e, 3); break;
+    case 10: x = strtod(str, &e); break;
+    case 16: x = po2b_atod(str, &e, 4); break;
+    default: x = HUGE_VAL-HUGE_VAL; assert(0);
+  }
+  if (str == e) errno = EDOM;
+  else if (errno == ERANGE) errno = 0; /* allow over/underflow */
+  else if (errno) errno = EDOM; 
+  if (ep) *ep = e;
+  return x;
+}
+
+#ifndef OPT_TOWER
+/* returns NUMT_NONE and sets errno on failure */
+static numt_t strtoint(nump_t *zp, const char *str, char **endp, int radix)
+{
+  if (radix >= 2 && radix <= 36) {
+    char *ep = NULL; long l; errno = 0; 
+    l = strtol(str, &ep, radix);
+    if (errno == 0 && ep && ep > str && !isdigit(*ep)
+      && l >= FIXNUM_MIN && l <= FIXNUM_MAX) {
+      zp->fix = l; *endp = ep; 
+      return NUMT_FIX;
+    }
+  }
+  *endp = (char*)str;
+  errno = EDOM;
+  return NUMT_NONE;
+}
+
+/* towerless version of strtoflo */
+static numt_t strtoflo(nump_t *zp, const char *str, char **endp, int radix)
+{
+  double d; errno = 0; 
+  /* check for infnans first */
+  if (endp) *endp = (char*)str + 6;
+  if (0 == strncmp_ci(str, "+inf.0", 6)) { zp->flo = HUGE_VAL; return NUMT_FLO; } 
+  if (0 == strncmp_ci(str, "-inf.0", 6)) { zp->flo = -HUGE_VAL; return NUMT_FLO; } 
+  if (0 == strncmp_ci(str, "+nan.0", 6)) { zp->flo = HUGE_VAL-HUGE_VAL; return NUMT_FLO; } 
+  if (0 == strncmp_ci(str, "-nan.0", 6)) { zp->flo = HUGE_VAL-HUGE_VAL; return NUMT_FLO; }
+  /* never a ratio: inexact (b,o,x)decimal */
+  if (radix == 2 || radix == 4 || radix == 8 || radix == 10 || radix == 16) {
+    d = strtodn(str, radix, endp); /* will handle ints too */
+    if (errno == ERANGE) errno = 0; /* overflows and underflows are ok */
+    if (!errno) { zp->flo = d; return NUMT_FLO; }
+  } 
+  *endp = (char*)str; errno = EDOM;
+  return NUMT_NONE;
+}
+
+/* returns NUMT_NONE and sets errno on failure */
+numt_t strtoreal(nump_t *zp, const char *str, char **endp, int radix)
+{
+  const char *s = str, *e = NULL, *inex = NULL;
+  int forceie = 0; /* -1=#i 1=#e */
+  for (; s[0] == '#'; s += 2) {
+    switch (s[1]) {
+      case 'b': case 'B': radix = 2; break;
+      case 'o': case 'O': radix = 8; break;
+      case 'd': case 'D': radix = 10; break;
+      case 'x': case 'X': radix = 16; break;
+      case 'e': case 'E': forceie = 1; break;
+      case 'i': case 'I': forceie = -1; break;
+      default: goto err;
+    }
+  }
+  if (!*s || isspace(*s)) goto err;
+  switch (radix) {
+    case 2: case 4: case 8: inex = ".eEpPiInN"; break;
+    case 10: inex = ".eEiInN"; break;
+    case 16: inex = ".pPiInN"; break;
+  }
+  if (inex) for (e = s; *e; ++e) if (strchr(inex, *e)) break;
+  if (forceie < 0) { /* as inexact */
+    /* this will parse fixnums automatically */
+    return strtoflo(zp, s, endp, radix);
+  } else if (forceie > 0) { /* as exact */
+    if (!e || !*e) return strtoint(zp, s, endp, radix);
+    /* we have an inexact that can still fit a fixnum */
+    if (strtoflo(zp, s, endp, radix) == NUMT_FLO && flisint(zp->flo)) {
+      long long l = (long long)zp->flo;
+      if (l >= FIXNUM_MIN && l <= FIXNUM_MAX) {
+        zp->fix = (long)l; return NUMT_FIX;
+      }
+    } 
+    goto err;
+  } else { /* fixnum or flonum */
+    if (!inex) /* radix not supported by flo notation */
+      return strtoint(zp, s, endp, radix); 
+    for (e = s; *e; ++e) { if (strchr(inex, *e)) break; }
+    if (*e == 0) /* no signs of flo notation */ 
+      return strtoint(zp, s, endp, radix); 
+    else /* parse it as a flonum */
+      return strtoflo(zp, s, endp, radix);
+  }
+err:
+  *endp = (char*)str; errno = EDOM;
+  return NUMT_NONE;
+}
+
+/* towerless version of strtonum4 */
+numt_t strtonum4(fatnum4_t *fn, const char *s, char **endp, int radix) 
+{
+  int eno = errno; char *ep = NULL;
+  numt_t t = strtoreal(&fn->p[0], s, &ep, radix);
+  if (t != NUMT_NONE && !errno && (endp || (ep && *ep == 0))) {
+    errno = eno; if (endp) *endp = ep;
+    return fn->t = t;
+  }
+  return fn->t = NUMT_NONE; 
+}
+#endif
+
+
+/* check if x is not normally printed with a sign */
+int dnsignless(double x)
+{
+  if (x != x || x <= -HUGE_VAL || HUGE_VAL <= x) return 0;
+  if (x == 0.0 && 1.0/x < 0.0) return 0;
+  return x >= 0.0;
+}
+
+/* measure max. size of the buffer needed for printing */
+size_t dnfmtsize(int radix, int prc)
+{
+  assert(radix == 2 || radix == 4 || radix == 8 || radix == 10 || radix == 16);
+  /* prc will be clamped so as not to overflow buffer sizes below */
+  if (radix == 10) return DN_DEC_BUFSIZE; /* estimated up */
+  else return DN_MAX_BUFSIZE; /* largest of 2/8/16 estimated up */
+}
+
+/* format finite x into buffer; len should be at least as calculated by 
+ * dnfmtsize; returns buffer (prints left-to-right) or NULL on wrong radix */
+char *dntostr(char *buf, size_t len, double x, int radix, int mode, int prc)
+{
+  char *res = buf; unsigned int bbits = 4;
+  assert(len >= dnfmtsize(radix, prc));
+  if (x != x) return strcpy(buf, "+nan.0");
+  if (x > DBL_MAX) return strcpy(buf, "+inf.0");
+  if (x < -DBL_MAX) return strcpy(buf, "-inf.0");
+  switch (radix) {
+    case 10: {
+      /* make sure either . or e is always there */
+      int gotprc = (prc >= 0); char *s; double ax = fabs(x);
+      const double amax = (double)(1LL << DBL_MANT_DIG);
+      if (prc < 0 || prc > DBL_DECIMAL_DIG) prc = DBL_DECIMAL_DIG;
+      /* make sure we don't get a buffer overflow on really long fixed padding */
+      if (mode == 'f' && ax <= amax) sprintf(buf, "%.*f", prc, x);
+      /* switch to %g, but don't do full precision unless specifically asked for it */
+      else if (mode == 'f' && prc < DBL_DECIMAL_DIG) sprintf(buf, "%.*g", DBL_DECIMAL_DIG-1, x);
+      else if (mode == 'e' || mode == 'a') sprintf(buf, "%.*e", prc, x);
+      else if (gotprc) sprintf(buf, "%.*g", prc, x);
+      else { /* compatibility with sloppy old skint that used %.16g */
+        sprintf(buf, "%.*g", DBL_DECIMAL_DIG-1, x); /* fine as it was? */
+        if (strtod(buf, NULL) != x) sprintf(buf, "%.*g", DBL_DECIMAL_DIG, x); 
+      }
+      for (s = buf; *s != 0; ++s) { if (*s == '.' || *s == 'e') break; }
+      if (*s == '.' || *s == 'e') {
+        if (*s == '.') s = strchr(s+1, 'e'); 
+        if (s) { /* remove + and leading 0s from expt */
+          char *t = ++s; if (*s == '-') ++s, ++t; 
+          while (*s == '+' || (*s == '0' && s[1])) ++s;
+          while (*s) *t++ = *s++; *t = 0; 
+        }
+      } else if (*s == 0 && (!gotprc || !prc)) { 
+        *s++ = '.'; if (!gotprc) *s++ = '0'; *s = 0; 
+      }
+    } break;
+    case 2: --bbits; case 4: --bbits; case 8: --bbits;
+    case 16: { /* got through with correct bbits */
+      int exc = (radix == 16 || mode == 'a') ? 'p' : 'e';
+      res = po2b_dtoa(x, buf, len, bbits, exc, mode, prc);
+      assert(res == buf);
+    } break;
+    default: return NULL;
+  }
+  assert(strlen(res) < len);
+  return res;
+}
+
+/* 'generic' writer for flonums; returns 0 or -1 on invalid radix */
+int wrdn(double x, int radix, int mode, int prc, int (*pf)(int, void*), void *pd)
+{
+  char buffer[DN_MAX_BUFSIZE];
+  char *buf = dntostr(buffer, DN_MAX_BUFSIZE, x, radix, mode, prc);
+  if (buf) for (; *buf; ++buf) (*pf)(*buf, pd);
+  return buf ? 0 : -1;
+}
+
+
+/* system-dependent extensions */
+
+extern int is_tty(FILE *fp)
+{
+  /* isatty() reports "not a tty" by setting ENOTTY, which is an answer here
+   * and not a failure -- do not leave it for unrelated code to trip over */
+  int res = fp && isatty(fileno(fp));
+  return (errno = 0), res;
+}
+
+extern int is_tty_port(obj o)
+{
+  FILE *fp = NULL; cxtype_t *vt = (cxtype_t*)portvt(o);
+#ifdef OPT_ENHTTY /* + tty */
+  extern int ttyisansi(void);
+  if (vt == IPORT_TTY_NTAG) return 1;
+  if (vt == OPORT_TTY_NTAG) return ttyisansi() ? 'a' : 1;
+#endif  
+  if (vt == IPORT_FILE_NTAG) fp = ((tifile_t*)iportdata(o))->fp;
+  else if (vt == IPORT_BYTEFILE_NTAG) fp = (FILE*)iportdata(o);
+  else if (vt == OPORT_FILE_NTAG) fp = (FILE*)oportdata(o); 
+  else if (vt == OPORT_BYTEFILE_NTAG) fp = (FILE*)oportdata(o); 
+  if (!fp) return 0;
+  { int res = isatty(fileno(fp)); return (errno = 0), res; }
+}
+
+extern char *argv_ref(int idx)
+{
+  char **pv = cxg_argv;
+  /* be careful with indexing! */
+  if (idx < 0) return NULL;
+  while (idx-- > 0) if (*pv++ == NULL) return NULL;
+  return *pv;
+}
+
+#if defined(WIN32)
+#define cxg_envv _environ
+#elif defined(__linux) 
+#define cxg_envv environ
+#elif defined(__APPLE__)
+extern char **environ;
+#define cxg_envv environ
+#else /* add more systems? */
+char **cxg_envv = { NULL };
+#endif
+
+extern char *envv_ref(int idx)
+{
+  char **pv = cxg_envv;
+  /* be careful with indexing! */
+  if (idx < 0) return NULL;
+  while (idx-- > 0) if (*pv++ == NULL) return NULL;
+  return *pv;
+}
+
+#ifdef WIN32
+int dirsep = '\\';
+#else
+int dirsep = '/';
+#endif
+
+#ifdef LIBDIR
+#define STR2(x) #x
+#define STR(x)  STR2(x)
+char *lib_dir = STR(LIBDIR);
+#else
+char *lib_dir = "";
+#endif
+
+#ifndef OPT_UNICODE /* ascii versions */
+const char *ugetcwd(void)
+{
+  static char buf[FILENAME_MAX]; size_t len;
+  if (getcwd(buf, FILENAME_MAX) == NULL) return NULL;
+  len = strlen(buf);
+  /* if this is a regular path that has internal separators but not at the end, add it */ 
+  if (len > 0 && len < FILENAME_MAX-1 && strchr(buf, dirsep) && buf[len-1] != dirsep) {
+    buf[len++] = dirsep; buf[len] = 0;
+  }  
+  return buf;
+}
+
+int uchdir(const char *cwd)
+{
+  return chdir(cwd);
+}
+#endif
+
+static char sig[33] = "????????????????????????????????";
+extern char* host_sig(void)
+{
+  const char *loc, *usc;
+  union _u { char ca[4]; uint32_t ui; } u; u.ui = 1;
+  sig[4] = (u.ca[0] == 1) ? 'l' : (u.ca[3] == 1) ? 'b' : '?';
+  sig[5] = '0' + (sizeof(void*))/2;
+#if defined(WIN32)
+  sig[0] = 'w'; sig[7] = ';';
+#elif defined(__APPLE__)
+  sig[0] = 'm'; sig[7] = ':';
+#elif defined(__linux__)
+  sig[0] = 'l'; sig[7] = ':';
+#else /* assume Linux/Unix */
+  sig[0] = 'u'; sig[7] = ':';
+#endif
+  sig[6] = dirsep;
+#ifdef C99_MATH_LIB
+  sig[8] = '9';
+#else
+  sig[8] = '0';
+#endif
+#ifdef XSI_MATH_LIB
+  sig[9] = 'x';
+#else
+  sig[9] = '0';
+#endif
+#ifdef FLONUMS_BOXED
+  sig[10] = 'b';
+#else
+  sig[10] = 'i';
+#endif
+#ifdef OPT_UNICODE
+  sig[11] = 'u';
+#else
+  sig[11] = '0';
+#endif
+#ifdef OPT_ENHTTY
+  sig[12] = 'e';
+#else
+  sig[12] = '0';
+#endif
+#ifdef OPT_TOWER
+  sig[13] = 't';
+#else
+  sig[13] = '0';
+#endif
+  /* 14..15 are reserved */
+  loc = setlocale(LC_ALL, NULL); if (!loc) loc = "en_US";
+  sig[16] = loc[0] ? loc[0] : '?';
+  sig[17] = (loc[0] && loc[1]) ? loc[1] : '?';
+  if (sig[16] == 'C' && sig[17] == '?') sig[16] = 'e', sig[17] = 'n';
+  usc = strchr(loc, '_'); if (!usc) usc = "_US";
+  sig[18] = usc[1] ? usc[1] : '?';
+  sig[19] = (usc[1] && usc[2]) ? usc[2] : '?';
+  return sig;
+}
+
+extern const char* host_facet(int fno)
+{
+  switch (fno) {
+    case 0: { /* full locale */
+      return setlocale(LC_ALL, NULL);
+    } break;
+    case 1: { /* encoding */
+      const char *p = setlocale(LC_ALL, NULL);
+      if (!p) break; p = strchr(p, '.');
+      if (!p) break; return p+1;
+    } break;
+    case 2: { /* reserved */
+    } break;
+    case 3: { /* enhanced terminal host/library */
+#ifdef OPT_ENHTTY
+      extern const char* enhterm_lib;
+      return enhterm_lib;
+#else
+      return NULL;
+#endif
+    } break;
+  }
+  return NULL;
+}
+
+/* current time as whole microseconds since the Unix epoch, NaN on failure */
+double microtime(void)
+{
+#if defined(_WIN32) || defined(_WIN64)
+  FILETIME ft; unsigned long long ticks;
+  typedef void (WINAPI *PreciseTimeFunc)(LPFILETIME);
+  static PreciseTimeFunc precise_func = NULL;
+  static int initialized = 0;
+
+  /* Lazy dynamic lookup (single-threaded). Uses high-precision clock on Windows 8+ 
+   * without causing executable load failures on Windows 7. */
+  if (!initialized) {
+    HMODULE hMod = GetModuleHandleA("kernel32.dll");
+    if (hMod) precise_func = (PreciseTimeFunc)GetProcAddress(hMod, "GetSystemTimePreciseAsFileTime");
+    initialized = 1;
+  }
+
+  if (precise_func) precise_func(&ft);
+  else GetSystemTimeAsFileTime(&ft);
+  ticks = ((unsigned long long)ft.dwHighDateTime << 32) | (unsigned long long)ft.dwLowDateTime;
+  /* Convert 100-ns ticks (1601 epoch) to 1-us intervals (1970 epoch) */
+  if (ticks >= 116444736000000000ULL)
+    return (double)(long long)((ticks - 116444736000000000ULL) / 10ULL);
+  else 
+    return (double)-(long long)((116444736000000000ULL - ticks) / 10ULL);
+
+#else /* POSIX (Linux, macOS, BSD) */
+#if defined(CLOCK_REALTIME)
+  struct timespec ts;
+  if (clock_gettime(CLOCK_REALTIME, &ts) == 0) {
+    return (double)ts.tv_sec * 1000000.0 + (double)(ts.tv_nsec / 1000);
+  }
+#endif
+  {
+    struct timeval tv;
+    if (gettimeofday(&tv, NULL) == 0) {
+      return (double)tv.tv_sec * 1000000.0 + (double)tv.tv_usec;
+    }
+  }
+#endif
+  return HUGE_VAL-HUGE_VAL; /* failed! */
+}
+
+/* process time as whole microseconds, NaN on failure */
+double microclock(void)
+{
+#if defined(_WIN32) || defined(_WIN64)
+  FILETIME creation, exit, kernel, user;
+  if (GetProcessTimes(GetCurrentProcess(), &creation, &exit, &kernel, &user)) {
+    unsigned long long k = ((unsigned long long)kernel.dwHighDateTime << 32) | kernel.dwLowDateTime;
+    unsigned long long u = ((unsigned long long)user.dwHighDateTime << 32) | user.dwLowDateTime;
+    return (double)((k + u) / 10ULL);
+  }
+#elif defined(CLOCK_PROCESS_CPUTIME_ID)
+  struct timespec ts;
+  if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) == 0) {
+    return (double)ts.tv_sec * 1000000.0 + (double)(ts.tv_nsec / 1000L);
+  }
+#elif defined(RUSAGE_SELF)
+  struct rusage ru;
+  if (getrusage(RUSAGE_SELF, &ru) == 0) {
+    return (double)(ru.ru_utime.tv_sec + ru.ru_stime.tv_sec) * 1000000.0 +
+           (double)(ru.ru_utime.tv_usec + ru.ru_stime.tv_usec);
+  }
+#else
+  clock_t c = clock();
+  if (c != (clock_t)-1) {
+    return (double)c / (double)CLOCKS_PER_SEC * 1000000.0;
+  }
+#endif
+  return HUGE_VAL - HUGE_VAL;
+}
+
+
+/* local UTC offset in seconds (-86400 < tzoffset < 86400 secs), 0 if unavailable */
+long tzoffset(void)
+{ 
+  time_t now = time(NULL); struct tm g, l, *tmp;
+  long offset; int days;
+
+  tmp = gmtime(&now);
+  if (!tmp) return 0L;
+  g = *tmp; /* copy static buffer safely */
+  tmp = localtime(&now);
+  if (!tmp) return 0L;
+  l = *tmp;
+
+  /* calculate basic clock-face difference in seconds */
+  offset = (long)(l.tm_hour - g.tm_hour) * 3600L +
+           (long)(l.tm_min - g.tm_min) * 60L +
+           (long)(l.tm_sec - g.tm_sec);
+
+  /* handle day wraps (and year wraps across Dec 31 <-> Jan 1) */
+  days = l.tm_yday - g.tm_yday;
+  if (days != 0) {
+    if (days < -1) days = 1; /* local is Jan 1, GMT is Dec 31 */
+    else if (days > 1) days = -1; /* local is Dec 31, GMT is Jan 1 */
+    offset += (long)days * 86400L;
+  }
+
+  return offset;
+}
+
+
+#ifdef OPT_ENHTTY
+#include "opt/n_enhtty.c"
+#endif
+
+#ifdef OPT_TOWER
+#include "opt/n_tower.c"
+#endif
+
