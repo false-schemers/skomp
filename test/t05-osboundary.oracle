@@ -1,0 +1,5 @@
+a non-ASCII file name round trips => #t
+and deletes => #f
+the environment can be enumerated => #t
+entries are pairs of strings => #t
+a name that is not set => #f

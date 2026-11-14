@@ -152,13 +152,27 @@ fi
 
 # clib/ carries every library a compiled program may import, since skomp ships
 # it and nothing else of the host's library tree.  The import refuses to run
-# when a shadowed name has no file there; this is the standing count.
+# when a shadowed name has no file there; this checks the two still agree, and
+# counts rather than comparing with a constant that would rot.  The name list
+# is read by paren balance: a line-range match runs past the end of the form.
+shadow_names() {
+  awk '
+    /^\(define \*shadow-library-names\*/ { inl = 1 }
+    inl { print
+          t = $0; gsub(/[^(]/, "", t); o += length(t)
+          t = $0; gsub(/[^)]/, "", t); c += length(t)
+          if (o > 0 && o == c) exit }
+  ' lib/skint/compile/cups-front.scm | grep -oE '\([a-z]+( [a-z0-9-]+)+\)'
+}
 if [ -d lib/skint/compile/clib ]; then
-  n=$(find lib/skint/compile/clib -name '*.sld' | wc -l)
-  if [ "$n" -ge 100 ]; then
-    ok "clib holds $n libraries"
+  files=$(find lib/skint/compile/clib -name '*.sld' | wc -l)
+  names=$(shadow_names | wc -l)
+  if [ "$files" -gt 0 ] && [ "$files" -eq "$names" ]; then
+    ok "clib holds one file per shadowed name ($files)"
   else
-    bad "clib holds $n libraries" "fewer than expected; see pre/README.md"
+    bad "clib holds one file per shadowed name" \
+        "$files files, $names shadowed names" \
+        "re-run pre/import.ssc, and delete any clib file no longer shadowed"
   fi
 else
   bad "clib is present"
@@ -187,7 +201,7 @@ run_wasm() {   # $1 = .wasm path
 if [ -z "$WASMRUN" ]; then
   skipt "wasm" "neither wasmtime nor node is installed"
 else
-  for name in t01-base t03-srfi; do
+  for name in t01-base t03-srfi t04-unicode; do
     src="test/$name.scm"
     oracle="test/$name.oracle"
     [ -f "$src" ] && [ -f "$oracle" ] || continue

@@ -1,0 +1,30 @@
+string-length of a lambda string => 3
+char->integer lambda => 955
+char->integer emoji => 128512
+string-ref codepoint => 955
+source literal is one char => 3
+write char => #\λ
+write string => "aλx"
+utf8 round trip => #t
+string->utf8 => #u8(97 206 187 120)
+symbol round trip => "aλx"
+symbol length => 3
+read a non-ASCII symbol => (aλx)
+read a hex char escape => #\λ
+read a non-ASCII string => "aλ"
+char-alphabetic? lambda => #t
+char-alphabetic? snowman => #f
+char-alphabetic? emoji => #f
+char-numeric? arabic zero => #t
+digit-value arabic zero => 0
+char-whitespace? nbsp => #t
+char-whitespace? ideo space => #t
+char-upper-case? LAMBDA => #t
+char-lower-case? lambda => #t
+char-upcase lambda => #\Λ
+char-downcase LAMBDA => #\λ
+char-foldcase LAMBDA => #\λ
+string-upcase => "AΛX"
+string-downcase => "aλx"
+string-ci=? LAMBDA lambda => #t
+char-ci=? LAMBDA lambda => #t

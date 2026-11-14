@@ -5,7 +5,7 @@ Written by pre/import.ssc.  Do not edit.
 
 skint
   path: ..\skint
-  commit: 64e8e96
+  commit: c6be199
   date: 2026-11-13
   dirty: yes
 
@@ -34,21 +34,21 @@ files
   39006  skint/opt\i_tower.c
   337079  skint/opt\n_tower.c
   8848  skint/opt\n_tower.h
-  65654  skint/opt\n_unicode.c
+  67097  skint/opt\n_unicode.c
   2361  skint/opt\n_unicode.h
   5920  lib/skint/compile.sld
   8083  lib/skint/compile/README.md
   55792  lib/skint\compile/cups-base.scm
   5440  lib/skint\compile/cups-signatures.scm
   58871  lib/skint\compile/cups-passes.scm
-  19117  lib/skint\compile/cups-front.scm
-  215633  lib/skint\compile/cups-dsmarv.scm
-  40368  lib/skint/compile/srt\scmi.c
-  106566  lib/skint/compile/srt\scmi.mvh
+  20760  lib/skint\compile/cups-front.scm
+  216264  lib/skint\compile/cups-dsmarv.scm
+  41047  lib/skint/compile/srt\scmi.c
+  106152  lib/skint/compile/srt\scmi.mvh
   17812  lib/skint/compile/srt\scmn.mvh
-  121213  lib/skint/compile/srt\scmrt.c
-  2112  lib/skint/compile/srt\scmrt.h
-  8519  lib/skint/compile/srt\scmrt.mvh
+  180337  lib/skint/compile/srt\scmrt.c
+  2775  lib/skint/compile/srt\scmrt.h
+  9272  lib/skint/compile/srt\scmrt.mvh
   92742  lib/skint/compile/clib\scheme/base.sld
   2213  lib/skint/compile/clib\scheme/case-lambda.sld
   9258  lib/skint/compile/clib\scheme/char.sld
@@ -98,7 +98,6 @@ files
   1009  lib/skint/compile/clib\srfi/121.sld
   1191  lib/skint/compile/clib\srfi/145.sld
   44197  lib/skint/compile/clib\srfi/146.sld
-  7857  lib/skint/compile/clib\srfi/4.sld
   2308  lib/skint/compile/clib\srfi/5.sld
   122  lib/skint/compile/clib\srfi/6.sld
   91  lib/skint/compile/clib\srfi/11.sld
@@ -119,7 +118,6 @@ files
   9915  lib/skint/compile/clib\srfi/71.sld
   42191  lib/skint/compile/clib\srfi/86.sld
   1657  lib/skint/compile/clib\srfi/156.sld
-  162  lib/skint/compile/clib\srfi/160.sld
   1304  lib/skint/compile/clib\srfi/173.sld
   6948  lib/skint/compile/clib\srfi/175.sld
   31756  lib/skint/compile/clib\srfi/189.sld
@@ -139,13 +137,6 @@ files
   88  lib/skint/compile/clib\srfi/251.sld
   12403  lib/skint/compile/clib\srfi/253.sld
   35023  lib/skint/compile/clib\srfi/257.sld
-  4984  lib/skint/compile/clib\srfi/160/base.sld
-  21197  lib/skint/compile/clib\srfi/160/f32.sld
-  21197  lib/skint/compile/clib\srfi/160/f64.sld
-  20862  lib/skint/compile/clib\srfi/160/s8.sld
-  21197  lib/skint/compile/clib\srfi/160/s16.sld
-  20862  lib/skint/compile/clib\srfi/160/u8.sld
-  21197  lib/skint/compile/clib\srfi/160/u16.sld
   425  lib/skint/compile/clib\srfi/227/definition.sld
   367  lib/skint/compile/clib\srfi/257/box.sld
   2402  lib/skint/compile/clib\srfi/257/misc.sld
