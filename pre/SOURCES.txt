@@ -5,28 +5,28 @@ Written by pre/import.ssc.  Do not edit.
 
 skint
   path: ..\skint
-  commit: c6be199
-  date: 2026-11-13
-  dirty: yes
+  commit: fd1774d
+  date: 2026-11-19
+  dirty: no
 
 marv
   path: ..\marv
-  commit: 367f097
-  date: 2026-11-05
-  dirty: yes
+  commit: 6ac65b6
+  date: 2026-11-14
+  dirty: no
 
 wcpl
   path: ..\WCPL\wcpl
-  commit: 03a086d
-  date: 2026-11-06
+  commit: a1145ee
+  date: 2026-11-14
   dirty: no
 
 files
   59482  skint\s.c
   7649  skint\k.c
   181070  skint\i.c
-  84502  skint\n.c
-  117559  skint\t.c
+  84904  skint\n.c
+  117332  skint\t.c
   6791  skint\s.h
   62261  skint\i.h
   1866  skint\k.h
@@ -42,13 +42,13 @@ files
   5440  lib/skint\compile/cups-signatures.scm
   58871  lib/skint\compile/cups-passes.scm
   20760  lib/skint\compile/cups-front.scm
-  216264  lib/skint\compile/cups-dsmarv.scm
-  41047  lib/skint/compile/srt\scmi.c
-  106152  lib/skint/compile/srt\scmi.mvh
+  216392  lib/skint\compile/cups-dsmarv.scm
+  41565  lib/skint/compile/srt\scmi.c
+  107283  lib/skint/compile/srt\scmi.mvh
   17812  lib/skint/compile/srt\scmn.mvh
-  180337  lib/skint/compile/srt\scmrt.c
-  2775  lib/skint/compile/srt\scmrt.h
-  9272  lib/skint/compile/srt\scmrt.mvh
+  191920  lib/skint/compile/srt\scmrt.c
+  2820  lib/skint/compile/srt\scmrt.h
+  9661  lib/skint/compile/srt\scmrt.mvh
   92742  lib/skint/compile/clib\scheme/base.sld
   2213  lib/skint/compile/clib\scheme/case-lambda.sld
   9258  lib/skint/compile/clib\scheme/char.sld
@@ -57,7 +57,7 @@ files
   4654  lib/skint/compile/clib\scheme/inexact.sld
   1997  lib/skint/compile/clib\scheme/lazy.sld
   3859  lib/skint/compile/clib\scheme/process-context.sld
-  10072  lib/skint/compile/clib\scheme/r5rs.sld
+  10343  lib/skint/compile/clib\scheme/r5rs.sld
   2428  lib/skint/compile/clib\scheme/complex.sld
   2015  lib/skint/compile/clib\scheme/r5rs-null.sld
   21373  lib/skint/compile/clib\scheme/read.sld

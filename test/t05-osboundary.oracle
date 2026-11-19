@@ -3,3 +3,5 @@ and deletes => #f
 the environment can be enumerated => #t
 entries are pairs of strings => #t
 a name that is not set => #f
+command-line is a non-empty list => #t
+its entries are strings => #t

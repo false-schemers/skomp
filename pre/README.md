@@ -41,9 +41,9 @@ target descriptions are read by the compiler's output.
 
 | part | version |
 |---|---|
-| skint | 0.8.6 (`64e8e96`, 13 Nov 2026) |
-| marv | `367f097`, 5 Nov 2026 |
-| wcpl | `03a086d`, 6 Nov 2026 |
+| skint | 0.8.6 (`fd1774d`, 19 Nov 2026) |
+| marv | `6ac65b6`, 14 Nov 2026 |
+| wcpl | `a1145ee`, 14 Nov 2026 |
 
 MARV and WCPL carry no version string of their own, so the commit is the
 version. `pre/SOURCES.txt` holds what the last import actually took.

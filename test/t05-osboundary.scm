@@ -25,3 +25,13 @@
    (let ([e (car (get-environment-variables))])
      (and (pair? e) (string? (car e)) (string? (cdr e)))))
 (p "a name that is not set" (get-environment-variable "SKOMP_NO_SUCH_VAR_XYZ"))
+
+;; the command line.  The harness runs the binary with no arguments of its
+;; own, and the path in car varies with where it was built, so only the shape
+;; is checked.  This is the OS boundary that argvref crosses.
+(p "command-line is a non-empty list" (pair? (command-line)))
+(p "its entries are strings"
+   (let loop ([l (command-line)])
+     (cond [(null? l) #t]
+           [(string? (car l)) (loop (cdr l))]
+           [else #f])))

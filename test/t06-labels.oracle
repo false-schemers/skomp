@@ -1,0 +1,9 @@
+write leaves plain sharing alone => "((1 2) (1 2))"
+write-shared labels it => "(#0=(1 2) #0#)"
+write-simple leaves it alone => "((1 2) (1 2))"
+write labels a cycle => "#0=#(#0# 2)"
+write-shared labels a cycle => "#0=#(#0# 2)"
+write leaves a shared tail alone => "((1 3 4) (2 3 4))"
+write-shared opens the spine => "((1 . #0=(3 4)) (2 . #0#))"
+equal? still works after a scan => #t
+and interleaved with write-shared => #t
