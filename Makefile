@@ -23,7 +23,7 @@ CPR       = cp -a
 RM        = rm -f
 RMR       = rm -rf
 ARCH      = unknown
-VERSION   = $(shell sed -n 's/^#define SKOMP_VERSION "\([0-9.]*\)"/\1/p' skomp.c)
+VERSION   = $(shell sed -n 's/^.define SKOMP_VERSION "\([0-9.]*\)"/\1/p' skomp.c)
 HOME_DIR  = skomp-home
 
 $(info version is $(VERSION))
