@@ -2,22 +2,35 @@
 ; skomp compile driver: the Scheme side of the pipeline.
 ;---------------------------------------------------------------------------------------------
 ;
-;   skint -q skomp.ssc INPUT.scm OUTPUT.mvs [OPTIMIZE]
+;   skint -q skomp.ssc INPUT.scm OUTPUT.mvs [OPTIMIZE [STACK-PAGES]]
 ;
 ; skomp runs this with its own skint and with SKINT_LIBDIRS pointing at the
 ; directory above, which holds (skint compile) and nothing else of a library
 ; tree.  Both paths arrive exactly as the user wrote them, so the working
 ; directory decides what they mean, as it would for any other tool.
+;
+; Either optional slot may be "-", meaning that skomp was given no value for
+; it and the compiler's own default stands.  That keeps "not given" distinct
+; from "given the default", so a later change to a default reaches skomp
+; without skomp having to know what the default was.
 
 (import (scheme base) (scheme process-context) (skint compile))
 
+;; the k-th optional argument, or #f when it is absent or "-"
+(define (slot args k)
+  (let loop ([l (if (> (length args) 2) (list-tail args 2) '())] [i 0])
+    (cond [(null? l) #f]
+          [(= i k) (if (string=? (car l) "-") #f (car l))]
+          [else (loop (cdr l) (+ i 1))])))
+
 (let ([args (cdr (command-line))])
   (when (< (length args) 2)
-    (display "skomp.ssc: expected INPUT OUTPUT [OPTIMIZE]"
+    (display "skomp.ssc: expected INPUT OUTPUT [OPTIMIZE [STACK-PAGES]]"
              (current-error-port))
     (newline (current-error-port))
     (exit 1))
-  (if (null? (cddr args))
-      (compile-program (car args) (cadr args))
-      (compile-program (car args) (cadr args)
-                       cp-optimize (string->number (caddr args)))))
+  (let ([opt (slot args 0)] [pages (slot args 1)])
+    (apply compile-program (car args) (cadr args)
+           (append
+            (if opt   (list cp-optimize    (string->number opt))   '())
+            (if pages (list cp-stack-pages (string->number pages)) '())))))

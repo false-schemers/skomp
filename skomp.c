@@ -443,6 +443,8 @@ static void usage(FILE *fp)
   fprintf(fp, "  -L DIR                 synonym for -A\n");
   fprintf(fp, "      --scheme-optimize=N  compiler optimization level "
               "(0..3, default 1)\n");
+  fprintf(fp, "      --stack-pages=N    root stack size in pages of "
+              "64K 8-byte words (default 128)\n");
   fprintf(fp, "      --split-funcs=N    passed to marv\n");
   fprintf(fp, "  -v, --verbose          print each step before running it\n");
   fprintf(fp, "  -n, --dry-run          print the backend commands instead "
@@ -498,6 +500,7 @@ int main(int argc, char **argv)
   int nprelibs = 0, npostlibs = 0, ntargdirs = 0;
   int conly = 0, marvonly = 0, dryrun = 0;
   int optlevel = -1, schemeopt = -1;
+  long stackpages = -1;   /* -1 = not given; the compiler's own default stands */
   int i, rc;
   char mvt[MAXPATH], srt[MAXPATH], skint[MAXPATH], marv[MAXPATH];
   char lib[MAXPATH], ssc[MAXPATH], mvs[MAXPATH];
@@ -568,6 +571,16 @@ int main(int argc, char **argv)
           return 1;
         }
         schemeopt = val[0] - '0';
+      }
+      else if (n == 13 && strncmp(a, "--stack-pages", 13) == 0 &&
+               val != NULL) {
+        char *end;
+        stackpages = strtol(val, &end, 10);
+        if (*val == 0 || *end != 0 || stackpages < 1) {
+          fprintf(stderr, "skomp: --stack-pages takes a page count "
+                          "of 1 or more\n");
+          return 1;
+        }
       }
       else if (n == 13 && strncmp(a, "--split-funcs", 13) == 0 && val != NULL)
         splitfuncs = val;
@@ -917,9 +930,19 @@ int main(int argc, char **argv)
   if (!buf_add_path(&cmd, input)) return 1;
   buf_add(&cmd, " ");
   if (!buf_add_path(&cmd, mvs)) return 1;
+  /* The driver's two optional slots are positional, so a stack-pages
+   * value needs the optimize slot filled; "-" there means no value, and
+   * leaves the compiler's own default in place. */
   if (schemeopt != -1) {
     char n[8];
     sprintf(n, " %d", schemeopt);
+    buf_add(&cmd, n);
+  } else if (stackpages != -1) {
+    buf_add(&cmd, " -");
+  }
+  if (stackpages != -1) {
+    char n[32];
+    sprintf(n, " %ld", stackpages);
     buf_add(&cmd, n);
   }
   rc = run(&cmd, "skint");

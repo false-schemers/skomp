@@ -30,6 +30,7 @@ second input file is an error.
 | `-A` | `--append-libdir=DIR` | `DIR` | Append a Scheme library search directory. |
 | `-L` | — | `DIR` | Synonym for `-A`. |
 | | `--scheme-optimize=N` | `N` | The compiler's own optimization level, 0..3 (default 1). |
+| | `--stack-pages=N` | `N` | The compiled program's root stack, in pages of 65536 eight-byte words (default 128, which is 64 MiB). Minimum 1. |
 | | `--split-funcs=N` | `N` | Passed to MARV: on a `cc` target, cut the generated C into pieces of at most `N` functions. |
 | `-v` | `--verbose` | *(none)* | Print each command before running it. |
 | `-n` | `--dry-run` | *(none)* | Print the backend commands instead of running them. |

@@ -58,6 +58,15 @@ Synonym for \fB\-A\fR.
 The compiler's own optimization level, 0..3.  Default is 1; the other levels
 are accepted and validated but not yet interpreted.
 .TP
+.BI \-\-stack\-pages= N
+The size of the compiled program's root stack, in pages.  A page is 65536
+words of eight bytes, so the default of 128 pages is 64 MiB.  The minimum is
+1.  The stack is a BSS segment, so its pages are touched only as the stack
+grows, and a large value costs address space rather than memory or executable
+size.  A program that outgrows the stack reports it on standard error and
+exits 1; every call that pushes a frame checks the stack against a limit one
+red zone short of the end, so nothing is written past the segment first.
+.TP
 .BI \-\-split\-funcs= N
 Passed to MARV: on a \fBcc\fR target, cut the generated C into pieces of at
 most \fIN\fR function definitions, each compiled as its own translation unit.
