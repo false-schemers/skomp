@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
 #include "skomp_src.h"
 
 #define SKOMP_VERSION "0.1.0"
@@ -420,40 +421,130 @@ static int mvt_obj_ext(const char *mvtpath, char *dst, size_t cap)
 /* ---------------------------------------------------------------- */
 /* usage                                                            */
 
-static void usage(FILE *fp)
+/* ---------------------------------------------------------------- */
+/* the option parser                                                */
+/*                                                                  */
+/* egetopt, copied from marv (m.c), so that skomp answers to the    */
+/* same shapes its sister programs do: clustered short flags, an    */
+/* option argument attached or separate, long options spelled       */
+/* --name=VALUE, and -- ending the options.  A long option is an    */
+/* option-with-argument named -, which the trailing -: in the spec  */
+/* declares, so --target=cc arrives as eoptarg "target=cc".         */
+/*                                                                  */
+/* skomp links none of marv, so this is a copy rather than a share; */
+/* that it stays a copy of THAT parser is the whole point of it.    */
+/* The two departures from the original: int where marv has bool,   */
+/* because this file uses no <stdbool.h>, and the stored strings    */
+/* are kept rather than duplicated, because both are literals here. */
+/* [cco] */
+
+static const char *g_progname = "skomp";
+static const char *g_usage;
+
+static const char *progname(void) { return g_progname; }
+static const char *usage(void) { return g_usage; }
+static void setusage(const char *str) { g_usage = str; }
+
+/* eusage: report wrong usage, then exit */
+static void eusage(const char *fmt, ...)
 {
-  fprintf(fp, "usage: skomp [-t TARGDES] [-c] [OPTION]... FILE\n");
-  fprintf(fp, "  FILE is one Scheme program: the compiler is a "
-              "whole-program compiler\n");
-  fprintf(fp, "  -t, --target=TARGDES   target description "
-              "(default: cl on Windows, cc elsewhere)\n");
-  fprintf(fp, "  -T, --target-dir=DIR   add DIR to the .mvt lookup path\n");
-  fprintf(fp, "  -c, --compile          compile to a target object file, "
-              "do not link\n");
-  fprintf(fp, "  -S, --marv-source      stop after writing the MARV "
-              "module (.mvs)\n");
-  fprintf(fp, "  -o, --output=FILE      output file; required unless -c or "
-              "-S is given\n");
-  fprintf(fp, "  -O LEVEL               backend optimization level "
-              "(0, 1, 2, or 3)\n");
-  fprintf(fp, "  -I, --prepend-libdir=DIR  prepend a Scheme library "
-              "search directory\n");
-  fprintf(fp, "  -A, --append-libdir=DIR   append a Scheme library "
-              "search directory\n");
-  fprintf(fp, "  -L DIR                 synonym for -A\n");
-  fprintf(fp, "      --scheme-optimize=N  compiler optimization level "
-              "(0..3, default 1)\n");
-  fprintf(fp, "      --stack-pages=N    root stack size in pages of "
-              "64K 8-byte words (default 128)\n");
-  fprintf(fp, "      --split-funcs=N    passed to marv\n");
-  fprintf(fp, "  -v, --verbose          print each step before running it\n");
-  fprintf(fp, "  -n, --dry-run          print the backend commands instead "
-              "of running them\n");
-  fprintf(fp, "  -M, --makefile-dir=DIR package the build and makefile "
-              "in DIR\n");
-  fprintf(fp, "  -h, --help             print this\n");
-  fprintf(fp, "  -V, --version          print version information\n");
+  va_list args;
+  fflush(stdout);
+  fprintf(stderr, "%s: ", progname());
+  va_start(args, fmt);
+  vfprintf(stderr, fmt, args);
+  va_end(args);
+  fprintf(stderr, "\n");
+  if (usage() != NULL)
+    fprintf(stderr, "usage: %s %s\n", progname(), usage());
+  exit(1);
 }
+
+/* -h and --help answer on standard output and succeed; eusage sends the
+ * same text to standard error and exits 1.  One stored string, so they
+ * cannot drift apart. */
+static void skhelp(void)
+{
+  fprintf(stdout, "usage: %s %s\n", progname(), usage());
+}
+
+static int eoptind = 1, eopterr = 1, eoptopt = 0, eoptich = 0;
+static char *eoptarg = NULL;
+
+static int egetopt(int argc, char *argv[], const char *opts)
+{
+  int c; char *popt;
+
+  /* check if it is time to stop */
+  if (eoptich == 0) {
+    if (eoptind >= argc)
+      return EOF;
+    if (argv[eoptind][0] != '-' ||
+        argv[eoptind][1] == '\0')
+      return EOF;
+    if (strcmp(argv[eoptind], "--") == 0) {
+      ++eoptind;
+      return EOF;
+    }
+  }
+
+  /* get next option char */
+  c = argv[eoptind][++eoptich];
+
+  /* check if it is legal */
+  if (c == ':' || (popt = strchr(opts, c)) == NULL) {
+    if (eopterr) {
+      eusage("illegal option: -%c", c);
+    }
+    if (argv[eoptind][++eoptich] == '\0') {
+      ++eoptind;
+      eoptich = 0;
+    }
+    eoptopt = c;
+    return '?';
+  }
+
+  /* check if it should be accompanied by arg */
+  if (popt[1] == ':') {
+    if (argv[eoptind][++eoptich] != '\0') {
+      eoptarg  = argv[eoptind++] + eoptich;
+    } else if (++eoptind >= argc) {
+      if (eopterr) {
+        eusage("option -%c requires an argument", c);
+      }
+      eoptich = 0;
+      eoptopt = c;
+      return '?';
+    } else {
+      eoptarg = argv[eoptind++];
+    }
+    eoptich = 0;
+  } else {
+    if (argv[eoptind][eoptich + 1] == '\0') {
+      ++eoptind;
+      eoptich = 0;
+    }
+    eoptarg  = NULL;
+  }
+
+  /* eoptopt, eoptind and eoptarg are updated */
+  return c;
+}
+
+static int streql(const char *s1, const char *s2)
+{
+  if (s1 == NULL && s2 == NULL) return 1;
+  if (s1 == NULL || s2 == NULL) return 0;
+  return strcmp(s1, s2) == 0;
+}
+
+static char *strprf(const char *str, const char *prefix)
+{
+  while (*str && *str == *prefix) ++str, ++prefix;
+  if (*prefix) return NULL;
+  return (char *)str;
+}
+
 
 static void version(void)
 {
@@ -487,6 +578,46 @@ static int run(const buf_t *cmd, const char *what)
 /* ---------------------------------------------------------------- */
 /* main                                                             */
 
+/* An optimization level, as -O, --optimize and --scheme-optimize all want
+ * one.  WHAT is the option as written, so the complaint names the spelling
+ * the caller used rather than one of its synonyms. */
+static int opt_level(const char *what, const char *val)
+{
+  if (val[0] < '0' || val[0] > '3' || val[1] != 0)
+    eusage("%s takes 0, 1, 2 or 3, not %s", what, val);
+  return val[0] - '0';
+}
+
+/* --stack-pages=N */
+static long page_count(const char *val)
+{
+  char *end;
+  long n;
+  n = strtol(val, &end, 10);
+  if (*val == 0 || *end != 0 || n < 1)
+    eusage("--stack-pages takes a page count of 1 or more, not %s", val);
+  return n;
+}
+
+/* one more directory in a fixed-size list */
+static void add_dir(const char *what, const char **v, int *n, const char *dir)
+{
+  if (*n >= MAXDIRS) eusage("too many %s options", what);
+  v[(*n)++] = dir;
+}
+
+/* The long options that take a value.  Spelled out rather than walked over
+ * a table because a block-level static declaration is not portable to
+ * every compiler this family is built with. */
+static int long_wants_arg(const char *name)
+{
+  return streql(name, "target") || streql(name, "target-dir")
+      || streql(name, "output") || streql(name, "optimize")
+      || streql(name, "prepend-libdir") || streql(name, "append-libdir")
+      || streql(name, "scheme-optimize") || streql(name, "stack-pages")
+      || streql(name, "split-funcs") || streql(name, "makefile-dir");
+}
+
 int main(int argc, char **argv)
 {
   const char *targdes = NULL;
@@ -501,7 +632,7 @@ int main(int argc, char **argv)
   int conly = 0, marvonly = 0, dryrun = 0;
   int optlevel = -1, schemeopt = -1;
   long stackpages = -1;   /* -1 = not given; the compiler's own default stands */
-  int i, rc;
+  int i, opt, rc;
   char mvt[MAXPATH], srt[MAXPATH], skint[MAXPATH], marv[MAXPATH];
   char lib[MAXPATH], ssc[MAXPATH], mvs[MAXPATH];
   static char libdirs[MAXCMD];
@@ -510,183 +641,111 @@ int main(int argc, char **argv)
   static char wcpllib[MAXPATH + 64];
   buf_t cmd;
 
-  /* ---- options.  POSIX shapes, as marv has them: clustered short flags,
-     and an option argument either attached or separate. */
-  for (i = 1; i < argc; i++) {
-    const char *a = argv[i];
-    if (a[0] != '-' || a[1] == 0) {
-      if (input != NULL) {
-        fprintf(stderr, "skomp: more than one input file: %s\n", a);
-        fprintf(stderr, "  the compiler is a whole-program compiler, so it "
-                        "takes one program\n");
-        return 1;
-      }
-      input = a;
-      continue;
+  /* ---- options.  egetopt is the parser marv and wcpl use, so all three
+     answer to the same shapes: clustered short flags, an option argument
+     attached or separate, long options spelled --name=VALUE, and -- ending
+     the options.  Options come before the input file, as they must for the
+     sister programs too. */
+  setusage
+    ("[-t TARGDES] [-c] [OPTION]... FILE\n"
+     "  FILE is one Scheme program: the compiler is a "
+     "whole-program compiler\n"
+     "  -t, --target=TARGDES   target description "
+     "(default: cl on Windows, cc elsewhere)\n"
+     "  -T, --target-dir=DIR   add DIR to the .mvt lookup path\n"
+     "  -c, --compile          compile to a target object file, "
+     "do not link\n"
+     "  -S, --marv-source      stop after writing the MARV "
+     "module (.mvs)\n"
+     "  -o, --output=FILE      output file; required unless -c or "
+     "-S is given\n"
+     "  -O, --optimize=LEVEL   backend optimization level "
+     "(0, 1, 2, or 3)\n"
+     "  -I, --prepend-libdir=DIR  prepend a Scheme library "
+     "search directory\n"
+     "  -A, --append-libdir=DIR   append a Scheme library "
+     "search directory\n"
+     "  -L DIR                 synonym for -A\n"
+     "      --scheme-optimize=N  compiler optimization level "
+     "(0..3, default 1)\n"
+     "      --stack-pages=N    root stack size in pages of "
+     "64K 8-byte words (default 128)\n"
+     "  -K, --split-funcs=N    passed to marv\n"
+     "  -v, --verbose          print each step before running it\n"
+     "  -n, --dry-run          print the backend commands instead "
+     "of running them\n"
+     "  -M, --makefile-dir=DIR package the build and makefile "
+     "in DIR\n"
+     "  -h, --help             print this\n"
+     "  -V, --version          print version information");
+  while ((opt = egetopt(argc, argv, "cSnvhVt:T:o:O:I:A:L:M:K:-:")) != EOF) {
+    switch (opt) {
+      case 'c': conly = 1; break;
+      case 'S': marvonly = 1; break;
+      case 'n': dryrun = 1; break;
+      case 'v': g_verbose = 1; break;
+      case 'h': skhelp(); return 0;
+      case 'V': resolve_home(argv[0], 0); version(); return 0;
+      case 't': targdes = eoptarg; break;
+      case 'o': output = eoptarg; break;
+      case 'M': mdir = eoptarg; break;
+      case 'K': splitfuncs = eoptarg; break;
+      case 'O': optlevel = opt_level("-O", eoptarg); break;
+      case 'T': add_dir("-T", targdirs, &ntargdirs, eoptarg); break;
+      case 'I': add_dir("-I", prelibs, &nprelibs, eoptarg); break;
+      case 'A':
+      case 'L': add_dir("-A", postlibs, &npostlibs, eoptarg); break;
+      case '-': {
+        char *arg;
+        if (streql(eoptarg, "compile")) conly = 1;
+        else if (streql(eoptarg, "marv-source")) marvonly = 1;
+        else if (streql(eoptarg, "verbose")) g_verbose = 1;
+        else if (streql(eoptarg, "dry-run")) dryrun = 1;
+        else if (streql(eoptarg, "help")) { skhelp(); return 0; }
+        else if (streql(eoptarg, "version"))
+          { resolve_home(argv[0], 0); version(); return 0; }
+        else if ((arg = strprf(eoptarg, "target-dir=")) != NULL)
+          add_dir("-T", targdirs, &ntargdirs, arg);
+        else if ((arg = strprf(eoptarg, "target=")) != NULL) targdes = arg;
+        else if ((arg = strprf(eoptarg, "output=")) != NULL) output = arg;
+        else if ((arg = strprf(eoptarg, "optimize=")) != NULL)
+          optlevel = opt_level("--optimize", arg);
+        else if ((arg = strprf(eoptarg, "prepend-libdir=")) != NULL)
+          add_dir("-I", prelibs, &nprelibs, arg);
+        else if ((arg = strprf(eoptarg, "append-libdir=")) != NULL)
+          add_dir("-A", postlibs, &npostlibs, arg);
+        else if ((arg = strprf(eoptarg, "scheme-optimize=")) != NULL)
+          schemeopt = opt_level("--scheme-optimize", arg);
+        else if ((arg = strprf(eoptarg, "stack-pages=")) != NULL)
+          stackpages = page_count(arg);
+        else if ((arg = strprf(eoptarg, "split-funcs=")) != NULL) splitfuncs = arg;
+        else if ((arg = strprf(eoptarg, "makefile-dir=")) != NULL) mdir = arg;
+        /* A long option carries its value with =, so a bare one that wants
+         * a value is a missing argument rather than an unknown option. */
+        else if (long_wants_arg(eoptarg))
+          eusage("option --%s requires an argument, written --%s=VALUE",
+                 eoptarg, eoptarg);
+        else eusage("illegal option: --%s", eoptarg);
+      } break;
     }
-    if (strcmp(a, "--") == 0) {
-      for (i = i + 1; i < argc; i++) {
-        if (input != NULL) {
-          fprintf(stderr, "skomp: more than one input file: %s\n", argv[i]);
-          return 1;
-        }
-        input = argv[i];
-      }
-      break;
-    }
-    if (a[1] == '-') {
-      /* long options */
-      const char *val;
-      size_t n;
-      val = strchr(a, '=');
-      n = val != NULL ? (size_t)(val - a) : strlen(a);
-      val = val != NULL ? val + 1 : NULL;
-      if (n == 8 && strncmp(a, "--target", 8) == 0 && val != NULL)
-        targdes = val;
-      else if (n == 12 && strncmp(a, "--target-dir", 12) == 0 && val != NULL) {
-        if (ntargdirs >= MAXDIRS) { fprintf(stderr, "skomp: too many -T\n");
-                                    return 1; }
-        targdirs[ntargdirs++] = val;
-      }
-      else if (strcmp(a, "--compile") == 0) conly = 1;
-      else if (strcmp(a, "--marv-source") == 0) marvonly = 1;
-      else if (n == 8 && strncmp(a, "--output", 8) == 0 && val != NULL)
-        output = val;
-      else if (n == 16 && strncmp(a, "--prepend-libdir", 16) == 0 &&
-               val != NULL) {
-        if (nprelibs >= MAXDIRS) { fprintf(stderr, "skomp: too many -I\n");
-                                   return 1; }
-        prelibs[nprelibs++] = val;
-      }
-      else if (n == 15 && strncmp(a, "--append-libdir", 15) == 0 &&
-               val != NULL) {
-        if (npostlibs >= MAXDIRS) { fprintf(stderr, "skomp: too many -A\n");
-                                    return 1; }
-        postlibs[npostlibs++] = val;
-      }
-      else if (n == 17 && strncmp(a, "--scheme-optimize", 17) == 0 &&
-               val != NULL) {
-        if (val[0] < '0' || val[0] > '3' || val[1] != 0) {
-          fprintf(stderr, "skomp: --scheme-optimize takes 0, 1, 2 or 3\n");
-          return 1;
-        }
-        schemeopt = val[0] - '0';
-      }
-      else if (n == 13 && strncmp(a, "--stack-pages", 13) == 0 &&
-               val != NULL) {
-        char *end;
-        stackpages = strtol(val, &end, 10);
-        if (*val == 0 || *end != 0 || stackpages < 1) {
-          fprintf(stderr, "skomp: --stack-pages takes a page count "
-                          "of 1 or more\n");
-          return 1;
-        }
-      }
-      else if (n == 13 && strncmp(a, "--split-funcs", 13) == 0 && val != NULL)
-        splitfuncs = val;
-      else if (n == 14 && strncmp(a, "--makefile-dir", 14) == 0 && val != NULL)
-        mdir = val;
-      else if (strcmp(a, "--verbose") == 0) g_verbose = 1;
-      else if (strcmp(a, "--dry-run") == 0) dryrun = 1;
-      else if (strcmp(a, "--help") == 0) { usage(stdout); return 0; }
-      else if (strcmp(a, "--version") == 0) {
-        resolve_home(argv[0], 0);
-        version();
-        return 0;
-      }
-      else {
-        fprintf(stderr, "skomp: unknown option %s\n\n", a);
-        usage(stderr);
-        return 1;
-      }
-      continue;
-    }
-    /* short options, possibly clustered */
-    {
-      const char *p = a + 1;
-      while (*p != 0) {
-        char c = *p;
-        const char *val = NULL;
-        if (c == 't' || c == 'T' || c == 'o' || c == 'O' || c == 'I' ||
-            c == 'A' || c == 'L' || c == 'M') {
-          if (p[1] != 0) { val = p + 1; p = ""; }
-          else if (i + 1 < argc) { val = argv[++i]; p = ""; }
-          else {
-            fprintf(stderr, "skomp: -%c needs a value\n", c);
-            return 1;
-          }
-        } else {
-          p++;
-        }
-        switch (c) {
-          case 't': targdes = val; break;
-          case 'T':
-            if (ntargdirs >= MAXDIRS) { fprintf(stderr, "skomp: too many -T\n");
-                                        return 1; }
-            targdirs[ntargdirs++] = val;
-            break;
-          case 'o': output = val; break;
-          case 'O':
-            if (val[0] < '0' || val[0] > '3' || val[1] != 0) {
-              fprintf(stderr, "skomp: -O takes 0, 1, 2 or 3\n");
-              return 1;
-            }
-            optlevel = val[0] - '0';
-            break;
-          case 'I':
-            if (nprelibs >= MAXDIRS) { fprintf(stderr, "skomp: too many -I\n");
-                                       return 1; }
-            prelibs[nprelibs++] = val;
-            break;
-          case 'A':
-          case 'L':
-            if (npostlibs >= MAXDIRS) { fprintf(stderr, "skomp: too many -A\n");
-                                        return 1; }
-            postlibs[npostlibs++] = val;
-            break;
-          case 'M': mdir = val; break;
-          case 'c': conly = 1; break;
-          case 'S': marvonly = 1; break;
-          case 'v': g_verbose = 1; break;
-          case 'n': dryrun = 1; break;
-          case 'h': usage(stdout); return 0;
-          case 'V': resolve_home(argv[0], 0); version(); return 0;
-          default:
-            fprintf(stderr, "skomp: unknown option -%c\n\n", c);
-            usage(stderr);
-            return 1;
-        }
-      }
-    }
+  }
+  for (; eoptind < argc; ++eoptind) {
+    if (input != NULL)
+      eusage("more than one input file: %s -- this is a whole-program "
+             "compiler, so it takes one program", argv[eoptind]);
+    input = argv[eoptind];
   }
 
-  if (input == NULL) {
-    fprintf(stderr, "skomp: no input file specified\n\n");
-    usage(stderr);
-    return 1;
-  }
-  if (conly && marvonly) {
-    fprintf(stderr, "skomp: -c and -S ask for different outputs\n");
-    return 1;
-  }
-  if (mdir != NULL && (conly || marvonly)) {
-    fprintf(stderr, "skomp: -M cannot be combined with -c or -S\n");
-    return 1;
-  }
-  if (mdir != NULL && output == NULL) {
-    fprintf(stderr, "skomp: -M needs -o to name the executable\n");
-    return 1;
-  }
-  if (!conly && !marvonly && output == NULL) {
-    fprintf(stderr, "skomp: -o is required unless -c or -S is given\n");
-    return 1;
-  }
+  if (input == NULL) eusage("no input file specified");
+  if (conly && marvonly) eusage("-c and -S ask for different outputs");
+  if (mdir != NULL && (conly || marvonly))
+    eusage("-M cannot be combined with -c or -S");
+  if (mdir != NULL && output == NULL)
+    eusage("-M needs -o to name the executable");
+  if (!conly && !marvonly && output == NULL)
+    eusage("-o is required unless -c or -S is given");
   if (!file_readable(input)) {
     fprintf(stderr, "skomp: cannot read %s\n", input);
-    return 1;
-  }
-  if (schemeopt != -1 && (schemeopt < 0 || schemeopt > 3)) {
-    fprintf(stderr, "skomp: --scheme-optimize takes 0, 1, 2 or 3\n");
     return 1;
   }
   if (targdes == NULL) targdes = host_windows() ? "cl" : "cc";

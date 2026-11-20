@@ -13,7 +13,7 @@ marv
   path: ..\marv
   commit: 6ac65b6
   date: 2026-11-14
-  dirty: no
+  dirty: yes
 
 wcpl
   path: ..\WCPL\wcpl
@@ -143,7 +143,7 @@ files
   45615  marv\m.c
   139364  marv\r.c
   144894  marv\v.c
-  58042  marv\a.c
+  60167  marv\a.c
   10448  marv\m.h
   14199  marv\r.h
   1488  marv\v.h

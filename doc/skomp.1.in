@@ -41,7 +41,7 @@ the input as \fIFILE\fB.mvs\fR.
 .BR \-o ", " \-\-output =\fIFILE\fR
 Output pathname.  Required unless \fB\-c\fR or \fB\-S\fR is given.
 .TP
-.BI \-O " LEVEL"
+.BR \-O ", " \-\-optimize =\fILEVEL\fR
 Optimization level 0..3 for the backend C compiler, passed to MARV.  It does
 not change the Scheme compiler's own code generation.
 .TP
@@ -67,7 +67,7 @@ size.  A program that outgrows the stack reports it on standard error and
 exits 1; every call that pushes a frame checks the stack against a limit one
 red zone short of the end, so nothing is written past the segment first.
 .TP
-.BI \-\-split\-funcs= N
+.BR \-K ", " \-\-split\-funcs =\fIN\fR
 Passed to MARV: on a \fBcc\fR target, cut the generated C into pieces of at
 most \fIN\fR function definitions, each compiled as its own translation unit.
 .TP

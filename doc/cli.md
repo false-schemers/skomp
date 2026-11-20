@@ -25,21 +25,23 @@ second input file is an error.
 | `-c` | `--compile` | *(none)* | Compile to a target object file (`.c`, `.wo` or `.s`) without linking. |
 | `-S` | `--marv-source` | *(none)* | Stop after writing the MARV module (`.mvs`). |
 | `-o` | `--output=FILE` | `FILE` | Output pathname. Required unless `-c` or `-S` is given. |
-| `-O` | — | `0`..`3` | Optimization level for the backend C compiler, passed to MARV. |
+| `-O` | `--optimize=LEVEL` | `0`..`3` | Optimization level for the backend C compiler, passed to MARV. |
 | `-I` | `--prepend-libdir=DIR` | `DIR` | Prepend a Scheme library search directory. |
 | `-A` | `--append-libdir=DIR` | `DIR` | Append a Scheme library search directory. |
 | `-L` | — | `DIR` | Synonym for `-A`. |
 | | `--scheme-optimize=N` | `N` | The compiler's own optimization level, 0..3 (default 1). |
 | | `--stack-pages=N` | `N` | The compiled program's root stack, in pages of 65536 eight-byte words (default 128, which is 64 MiB). Minimum 1. |
-| | `--split-funcs=N` | `N` | Passed to MARV: on a `cc` target, cut the generated C into pieces of at most `N` functions. |
+| `-K` | `--split-funcs=N` | `N` | Passed to MARV: on a `cc` target, cut the generated C into pieces of at most `N` functions. |
 | `-v` | `--verbose` | *(none)* | Print each command before running it. |
 | `-n` | `--dry-run` | *(none)* | Print the backend commands instead of running them. |
 | `-M` | `--makefile-dir=DIR` | `DIR` | Write a self-contained build directory with a makefile instead of running the backend. |
 | `-h` | `--help` | *(none)* | Print usage. |
 | `-V` | `--version` | *(none)* | Print skomp's version, the commit of each imported part, and the private root in use. |
 
-Options follow POSIX shapes: short flags may be clustered (`-vc`), and an option
-argument may be separate (`-t cc`) or attached (`-tcc`, `--target=cc`).
+Options follow POSIX shapes: short flags may be clustered (`-vc`), and a short
+option argument may be separate (`-t cc`) or attached (`-tcc`). A long option
+carries its argument with `=` (`--target=cc`); `--target cc` is not accepted.
+A `--` argument ends the options, and options come before the input file.
 
 ## Differences from MARV's command line
 
