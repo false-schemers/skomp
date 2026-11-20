@@ -638,9 +638,9 @@ static int run(const buf_t *cmd, const char *what)
 /* ---------------------------------------------------------------- */
 /* main                                                             */
 
-/* An optimization level, as -O, --optimize and --scheme-optimize all want
- * one.  WHAT is the option as written, so the complaint names the spelling
- * the caller used rather than one of its synonyms. */
+/* An optimization level, which -O and --optimize both want.  WHAT is the
+ * option as written, so the complaint names the spelling the caller used
+ * rather than the other one. */
 static int opt_level(const char *what, const char *val)
 {
   if (val[0] < '0' || val[0] > '3' || val[1] != 0)
@@ -678,7 +678,7 @@ int main(int argc, char **argv)
   const char *targdirs[MAXDIRS];
   int nprelibs = 0, npostlibs = 0, ntargdirs = 0;
   int conly = 0, marvonly = 0, dryrun = 0;
-  int optlevel = -1, schemeopt = -1;
+  int optlevel = -1;
   long stackpages = -1;   /* -1 = not given; the compiler's own default stands */
   int i, opt, rc;
   char mvt[MAXPATH], srt[MAXPATH], skint[MAXPATH], marv[MAXPATH];
@@ -707,15 +707,13 @@ int main(int argc, char **argv)
      "module (.mvs)\n"
      "  -o, --output=FILE      output file; required unless -c or "
      "-S is given\n"
-     "  -O, --optimize=LEVEL   backend optimization level "
+     "  -O, --optimize=LEVEL   optimization level for both halves "
      "(0, 1, 2, or 3)\n"
      "  -I, --prepend-libdir=DIR  prepend a Scheme library "
      "search directory\n"
      "  -A, --append-libdir=DIR   append a Scheme library "
      "search directory\n"
      "  -L DIR                 synonym for -A\n"
-     "      --scheme-optimize=N  compiler optimization level "
-     "(0..3, default 1)\n"
      "      --stack-pages=N    root stack size in pages of "
      "64K 8-byte words (default 128)\n"
      "  -K, --split-funcs=N    passed to marv\n"
@@ -763,8 +761,6 @@ int main(int argc, char **argv)
           add_dir(elongopt, prelibs, &nprelibs, eoptarg);
         else if (long_opt("append-libdir="))
           add_dir(elongopt, postlibs, &npostlibs, eoptarg);
-        else if (long_opt("scheme-optimize="))
-          schemeopt = opt_level(elongopt, eoptarg);
         else if (long_opt("stack-pages=")) stackpages = page_count(eoptarg);
         else if (long_opt("split-funcs=")) splitfuncs = eoptarg;
         else if (long_opt("makefile-dir=")) mdir = eoptarg;
@@ -1032,12 +1028,21 @@ int main(int argc, char **argv)
   if (!buf_add_path(&cmd, input)) return 1;
   buf_add(&cmd, " ");
   if (!buf_add_path(&cmd, mvs)) return 1;
-  /* The driver's two optional slots are positional, so a stack-pages
+  /* -O is one level for both halves of the pipeline: it reaches the
+   * backend C compiler as marv's -O, and the Scheme compiler here as
+   * cp-optimize.  There used to be a separate --scheme-optimize, which
+   * only ever set a parameter the compiler does not read; one option that
+   * will mean something to both is better than two, one of which means
+   * nothing.  The level is passed unclamped -- marv saturates it at 2 for
+   * a cl target because MSVC has no /O3, which says nothing about what
+   * the Scheme compiler should do with 3.
+   *
+   * The driver's two optional slots are positional, so a stack-pages
    * value needs the optimize slot filled; "-" there means no value, and
    * leaves the compiler's own default in place. */
-  if (schemeopt != -1) {
+  if (optlevel != -1) {
     char n[8];
-    sprintf(n, " %d", schemeopt);
+    sprintf(n, " %d", optlevel);
     buf_add(&cmd, n);
   } else if (stackpages != -1) {
     buf_add(&cmd, " -");

@@ -25,11 +25,10 @@ second input file is an error.
 | `-c` | `--compile` | *(none)* | Compile to a target object file (`.c`, `.wo` or `.s`) without linking. |
 | `-S` | `--marv-source` | *(none)* | Stop after writing the MARV module (`.mvs`). |
 | `-o` | `--output=FILE` | `FILE` | Output pathname. Required unless `-c` or `-S` is given. |
-| `-O` | `--optimize=LEVEL` | `0`..`3` | Optimization level for the backend C compiler, passed to MARV. |
+| `-O` | `--optimize=LEVEL` | `0`..`3` | Optimization level for the whole pipeline: passed to MARV for the backend C compiler, and to the Scheme compiler as `cp-optimize`. A `cl` target saturates the backend at 2, because MSVC has no `/O3`; the Scheme compiler is told the level as given. Without it, each half keeps its own default. |
 | `-I` | `--prepend-libdir=DIR` | `DIR` | Prepend a Scheme library search directory. |
 | `-A` | `--append-libdir=DIR` | `DIR` | Append a Scheme library search directory. |
 | `-L` | — | `DIR` | Synonym for `-A`. |
-| | `--scheme-optimize=N` | `N` | The compiler's own optimization level, 0..3 (default 1). |
 | | `--stack-pages=N` | `N` | The compiled program's root stack, in pages of 65536 eight-byte words (default 128, which is 64 MiB). Minimum 1. |
 | `-K` | `--split-funcs=N` | `N` | Passed to MARV: on a `cc` target, cut the generated C into pieces of at most `N` functions. |
 | `-v` | `--verbose` | *(none)* | Print each command before running it. |

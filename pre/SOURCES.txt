@@ -11,9 +11,9 @@ skint
 
 marv
   path: ..\marv
-  commit: 34b7e11
+  commit: 0c75509
   date: 2026-11-20
-  dirty: yes
+  dirty: no
 
 wcpl
   path: ..\WCPL\wcpl

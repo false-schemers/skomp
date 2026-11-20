@@ -42,8 +42,11 @@ the input as \fIFILE\fB.mvs\fR.
 Output pathname.  Required unless \fB\-c\fR or \fB\-S\fR is given.
 .TP
 .BR \-O ", " \-\-optimize =\fILEVEL\fR
-Optimization level 0..3 for the backend C compiler, passed to MARV.  It does
-not change the Scheme compiler's own code generation.
+Optimization level 0..3 for the whole pipeline: passed to MARV for the
+backend C compiler, and to the Scheme compiler as \fBcp\-optimize\fR.  A
+\fBcl\fR target saturates the backend at 2, because MSVC has no \fB/O3\fR;
+the Scheme compiler is told the level as given.  Without this option each
+half keeps its own default.
 .TP
 .BR \-I ", " \-\-prepend\-libdir =\fIDIR\fR
 Prepend \fIDIR\fR to the Scheme library search path.
