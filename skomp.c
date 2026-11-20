@@ -470,10 +470,19 @@ static void skhelp(void)
 
 static int eoptind = 1, eopterr = 1, eoptopt = 0, eoptich = 0;
 static char *eoptarg = NULL;
+static int g_eargc = 0;
+static char **g_eargv = NULL;
+
+/* the last option long_opt matched, as it would be written */
+static const char *elongopt = NULL;
+static char g_elongbuf[64];
 
 static int egetopt(int argc, char *argv[], const char *opts)
 {
   int c; char *popt;
+
+  /* long_opt needs these to reach a separated option argument */
+  g_eargc = argc; g_eargv = argv;
 
   /* check if it is time to stop */
   if (eoptich == 0) {
@@ -529,6 +538,57 @@ static int egetopt(int argc, char *argv[], const char *opts)
 
   /* eoptopt, eoptind and eoptarg are updated */
   return c;
+}
+
+/* Long options are parsed outside egetopt, which knows only that --
+ * takes an argument: for --target=cc it hands over "target=cc", and for
+ * --target cc it hands over "target" with eoptind left on "cc".
+ * long_opt hides that difference, so a caller writes one line per
+ * option and accepts both spellings.
+ *
+ * LOPT is the option name, with a trailing = where it takes a value.  A
+ * match returns true, sets elongopt to the option as written, and for a
+ * value-taking option leaves the value in eoptarg.  A value-taking
+ * option with nothing to take is reported here, so no caller needs a
+ * list of which options take values.
+ *
+ * A name that is a prefix of another is not a hazard: --target-dir=x
+ * fails long_opt("target=") because the character after the name is
+ * neither = nor the end, so the order of the tests does not matter.
+ * Copied from marv (m.c), like egetopt above. [cco] */
+static void set_elongopt(const char *lopt, size_t n)
+{
+  if (n + 3 > sizeof(g_elongbuf)) n = sizeof(g_elongbuf) - 3;
+  g_elongbuf[0] = g_elongbuf[1] = (char)45;   /* a hyphen, twice */
+  memcpy(g_elongbuf + 2, lopt, n);
+  g_elongbuf[n + 2] = 0;
+  elongopt = g_elongbuf;
+}
+
+static int long_opt(const char *lopt)
+{
+  size_t n;
+  int wantsarg;
+  n = strlen(lopt);
+  wantsarg = (n > 0 && lopt[n-1] == '=');
+  if (wantsarg) --n;
+  if (strncmp(eoptarg, lopt, n) != 0) return 0;
+  if (!wantsarg) {
+    if (eoptarg[n] != 0) return 0;
+    set_elongopt(lopt, n);
+    return 1;
+  }
+  if (eoptarg[n] == '=') {
+    set_elongopt(lopt, n);
+    eoptarg = eoptarg + n + 1;
+    return 1;
+  }
+  if (eoptarg[n] != 0) return 0;      /* a longer name, not this one */
+  set_elongopt(lopt, n);
+  if (eoptind >= g_eargc)
+    eusage("option %s requires an argument", elongopt);
+  eoptarg = g_eargv[eoptind++];
+  return 1;
 }
 
 static int streql(const char *s1, const char *s2)
@@ -595,7 +655,7 @@ static long page_count(const char *val)
   long n;
   n = strtol(val, &end, 10);
   if (*val == 0 || *end != 0 || n < 1)
-    eusage("--stack-pages takes a page count of 1 or more, not %s", val);
+    eusage("%s takes a page count of 1 or more, not %s", elongopt, val);
   return n;
 }
 
@@ -604,18 +664,6 @@ static void add_dir(const char *what, const char **v, int *n, const char *dir)
 {
   if (*n >= MAXDIRS) eusage("too many %s options", what);
   v[(*n)++] = dir;
-}
-
-/* The long options that take a value.  Spelled out rather than walked over
- * a table because a block-level static declaration is not portable to
- * every compiler this family is built with. */
-static int long_wants_arg(const char *name)
-{
-  return streql(name, "target") || streql(name, "target-dir")
-      || streql(name, "output") || streql(name, "optimize")
-      || streql(name, "prepend-libdir") || streql(name, "append-libdir")
-      || streql(name, "scheme-optimize") || streql(name, "stack-pages")
-      || streql(name, "split-funcs") || streql(name, "makefile-dir");
 }
 
 int main(int argc, char **argv)
@@ -696,35 +744,30 @@ int main(int argc, char **argv)
       case 'A':
       case 'L': add_dir("-A", postlibs, &npostlibs, eoptarg); break;
       case '-': {
-        char *arg;
-        if (streql(eoptarg, "compile")) conly = 1;
-        else if (streql(eoptarg, "marv-source")) marvonly = 1;
-        else if (streql(eoptarg, "verbose")) g_verbose = 1;
-        else if (streql(eoptarg, "dry-run")) dryrun = 1;
-        else if (streql(eoptarg, "help")) { skhelp(); return 0; }
-        else if (streql(eoptarg, "version"))
+        /* long_opt takes the name, with a trailing = where a value follows,
+         * and accepts both --name=VALUE and --name VALUE; the value arrives
+         * in eoptarg and the option as written in elongopt. */
+        if (long_opt("compile")) conly = 1;
+        else if (long_opt("marv-source")) marvonly = 1;
+        else if (long_opt("verbose")) g_verbose = 1;
+        else if (long_opt("dry-run")) dryrun = 1;
+        else if (long_opt("help")) { skhelp(); return 0; }
+        else if (long_opt("version"))
           { resolve_home(argv[0], 0); version(); return 0; }
-        else if ((arg = strprf(eoptarg, "target-dir=")) != NULL)
-          add_dir("-T", targdirs, &ntargdirs, arg);
-        else if ((arg = strprf(eoptarg, "target=")) != NULL) targdes = arg;
-        else if ((arg = strprf(eoptarg, "output=")) != NULL) output = arg;
-        else if ((arg = strprf(eoptarg, "optimize=")) != NULL)
-          optlevel = opt_level("--optimize", arg);
-        else if ((arg = strprf(eoptarg, "prepend-libdir=")) != NULL)
-          add_dir("-I", prelibs, &nprelibs, arg);
-        else if ((arg = strprf(eoptarg, "append-libdir=")) != NULL)
-          add_dir("-A", postlibs, &npostlibs, arg);
-        else if ((arg = strprf(eoptarg, "scheme-optimize=")) != NULL)
-          schemeopt = opt_level("--scheme-optimize", arg);
-        else if ((arg = strprf(eoptarg, "stack-pages=")) != NULL)
-          stackpages = page_count(arg);
-        else if ((arg = strprf(eoptarg, "split-funcs=")) != NULL) splitfuncs = arg;
-        else if ((arg = strprf(eoptarg, "makefile-dir=")) != NULL) mdir = arg;
-        /* A long option carries its value with =, so a bare one that wants
-         * a value is a missing argument rather than an unknown option. */
-        else if (long_wants_arg(eoptarg))
-          eusage("option --%s requires an argument, written --%s=VALUE",
-                 eoptarg, eoptarg);
+        else if (long_opt("target-dir="))
+          add_dir(elongopt, targdirs, &ntargdirs, eoptarg);
+        else if (long_opt("target=")) targdes = eoptarg;
+        else if (long_opt("output=")) output = eoptarg;
+        else if (long_opt("optimize=")) optlevel = opt_level(elongopt, eoptarg);
+        else if (long_opt("prepend-libdir="))
+          add_dir(elongopt, prelibs, &nprelibs, eoptarg);
+        else if (long_opt("append-libdir="))
+          add_dir(elongopt, postlibs, &npostlibs, eoptarg);
+        else if (long_opt("scheme-optimize="))
+          schemeopt = opt_level(elongopt, eoptarg);
+        else if (long_opt("stack-pages=")) stackpages = page_count(eoptarg);
+        else if (long_opt("split-funcs=")) splitfuncs = eoptarg;
+        else if (long_opt("makefile-dir=")) mdir = eoptarg;
         else eusage("illegal option: --%s", eoptarg);
       } break;
     }

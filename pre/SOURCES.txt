@@ -11,8 +11,8 @@ skint
 
 marv
   path: ..\marv
-  commit: 6ac65b6
-  date: 2026-11-14
+  commit: 34b7e11
+  date: 2026-11-20
   dirty: yes
 
 wcpl
@@ -140,11 +140,11 @@ files
   425  lib/skint/compile/clib\srfi/227/definition.sld
   367  lib/skint/compile/clib\srfi/257/box.sld
   2402  lib/skint/compile/clib\srfi/257/misc.sld
-  45615  marv\m.c
+  47850  marv\m.c
   139364  marv\r.c
   144894  marv\v.c
-  60167  marv\a.c
-  10448  marv\m.h
+  60962  marv\a.c
+  10563  marv\m.h
   14199  marv\r.h
   1488  marv\v.h
   998  marv\a.h

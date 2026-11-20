@@ -40,7 +40,8 @@ second input file is an error.
 
 Options follow POSIX shapes: short flags may be clustered (`-vc`), and a short
 option argument may be separate (`-t cc`) or attached (`-tcc`). A long option
-carries its argument with `=` (`--target=cc`); `--target cc` is not accepted.
+takes its argument either joined with `=` (`--target=cc`) or as the next
+argument (`--target cc`).
 A `--` argument ends the options, and options come before the input file.
 
 ## Differences from MARV's command line
