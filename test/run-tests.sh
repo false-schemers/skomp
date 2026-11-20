@@ -75,14 +75,33 @@ else
   bad "-c honours -o"
 fi
 
-# -M into a fresh directory builds; into a non-empty one is refused
-if "$SKOMP" -M "$WORK/mk" -o app test/t01-base.scm >/dev/null 2>&1 &&
-   [ -f "$WORK/mk/Makefile" ] &&
-   make -s -C "$WORK/mk" >/dev/null 2>&1 &&
-   [ -x "$WORK/mk/app" ]; then
-  ok "-M builds a self-contained directory"
+# -M into a fresh directory builds; into a non-empty one is refused.
+# Which makefile MARV writes, and which tool builds it, follow from the
+# target: a cl target gets an nmakefile for nmake, everything else a
+# Makefile for make.  Neither tool is required to be installed.  nmake is
+# given dash flags because a Git Bash reads /nologo as a path and rewrites
+# it. [cco]
+if ! "$SKOMP" -M "$WORK/mk" -o app test/t01-base.scm >/dev/null 2>&1; then
+  bad "-M builds a self-contained directory" "skomp -M failed"
+elif [ -f "$WORK/mk/nmakefile" ]; then
+  if ! command -v nmake >/dev/null 2>&1; then
+    skipt "-M builds a self-contained directory" "nmake is not installed"
+  elif (cd "$WORK/mk" && nmake -nologo -f nmakefile >/dev/null 2>&1) &&
+       [ -s "$WORK/mk/app.exe" ]; then
+    ok "-M builds a self-contained directory"
+  else
+    bad "-M builds a self-contained directory" "nmake did not build app.exe"
+  fi
+elif [ -f "$WORK/mk/Makefile" ]; then
+  if ! command -v make >/dev/null 2>&1; then
+    skipt "-M builds a self-contained directory" "make is not installed"
+  elif make -s -C "$WORK/mk" >/dev/null 2>&1 && [ -x "$WORK/mk/app" ]; then
+    ok "-M builds a self-contained directory"
+  else
+    bad "-M builds a self-contained directory" "make did not build app"
+  fi
 else
-  bad "-M builds a self-contained directory"
+  bad "-M builds a self-contained directory" "no makefile was written"
 fi
 mkdir -p "$WORK/mk2" && : > "$WORK/mk2/occupied"
 if "$SKOMP" -M "$WORK/mk2" -o app test/t01-base.scm > "$WORK/mk2.err" 2>&1; then

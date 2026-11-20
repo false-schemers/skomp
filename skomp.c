@@ -465,6 +465,7 @@ static void eusage(const char *fmt, ...)
  * cannot drift apart. */
 static void skhelp(void)
 {
+  fprintf(stdout, "SKOMP Scheme Compiler\n");
   fprintf(stdout, "usage: %s %s\n", progname(), usage());
 }
 
@@ -648,14 +649,16 @@ static int opt_level(const char *what, const char *val)
   return val[0] - '0';
 }
 
-/* --stack-pages=N */
-static long page_count(const char *val)
+/* -P N and --stack-pages=N.  WHAT is the option as written, because
+ * elongopt is set only by long_opt: a short option has to pass its own
+ * name, and a stale elongopt would name an unrelated option. */
+static long page_count(const char *what, const char *val)
 {
   char *end;
   long n;
   n = strtol(val, &end, 10);
   if (*val == 0 || *end != 0 || n < 1)
-    eusage("%s takes a page count of 1 or more, not %s", elongopt, val);
+    eusage("%s takes a page count of 1 or more, not %s", what, val);
   return n;
 }
 
@@ -696,35 +699,27 @@ int main(int argc, char **argv)
      sister programs too. */
   setusage
     ("[-t TARGDES] [-c] [OPTION]... FILE\n"
-     "  FILE is one Scheme program: the compiler is a "
-     "whole-program compiler\n"
-     "  -t, --target=TARGDES   target description "
-     "(default: cl on Windows, cc elsewhere)\n"
-     "  -T, --target-dir=DIR   add DIR to the .mvt lookup path\n"
-     "  -c, --compile          compile to a target object file, "
-     "do not link\n"
-     "  -S, --marv-source      stop after writing the MARV "
-     "module (.mvs)\n"
-     "  -o, --output=FILE      output file; required unless -c or "
-     "-S is given\n"
-     "  -O, --optimize=LEVEL   optimization level for both halves "
-     "(0, 1, 2, or 3)\n"
-     "  -I, --prepend-libdir=DIR  prepend a Scheme library "
-     "search directory\n"
-     "  -A, --append-libdir=DIR   append a Scheme library "
-     "search directory\n"
-     "  -L DIR                 synonym for -A\n"
-     "      --stack-pages=N    root stack size in pages of "
-     "64K 8-byte words (default 128)\n"
-     "  -K, --split-funcs=N    passed to marv\n"
-     "  -v, --verbose          print each step before running it\n"
-     "  -n, --dry-run          print the backend commands instead "
-     "of running them\n"
-     "  -M, --makefile-dir=DIR package the build and makefile "
-     "in DIR\n"
-     "  -h, --help             print this\n"
-     "  -V, --version          print version information");
-  while ((opt = egetopt(argc, argv, "cSnvhVt:T:o:O:I:A:L:M:K:-:")) != EOF) {
+     "\n"
+     "Options:\n"
+     "  -t, --target=TARGDES         Target description (default: cl on Windows, cc elsewhere)\n"
+     "  -T, --target-dir=DIR         Add DIR to the .mvt lookup path\n"
+     "  -c, --compile                Compile to a target object file, do not link\n"
+     "  -S, --marv-source            Stop after writing the MARV module (.mvs)\n"
+     "  -o, --output=FILE            Output file; required unless -c or -S is given\n"
+     "  -O, --optimize=LEVEL         Optimization level for the whole pipeline (0, 1, 2, or 3)\n"
+     "  -A, --append-libdir=DIR      Append a Scheme library search directory\n"
+     "  -I, --prepend-libdir=DIR     Prepend a Scheme library search directory\n"
+     "  -P, --stack-pages=N          Root stack size in pages of 64K 8-byte words (default 128)\n"
+     "  -K, --split-funcs=N          Passed to marv\n"
+     "  -v, --verbose                Print each step before running it\n"
+     "  -n, --dry-run                Print the backend commands instead of running them\n"
+     "  -M, --makefile-dir=DIR       Package the build and makefile in DIR\n"
+     "  -V, --version                Display version info\n"
+     "  -h, --help                   Display this help\n"
+     "\n"
+     "'--' ends options processing. FILE is an R7RS Scheme program"
+);
+  while ((opt = egetopt(argc, argv, "cSnvhVt:T:o:O:I:A:P:M:K:-:")) != EOF) {
     switch (opt) {
       case 'c': conly = 1; break;
       case 'S': marvonly = 1; break;
@@ -739,8 +734,8 @@ int main(int argc, char **argv)
       case 'O': optlevel = opt_level("-O", eoptarg); break;
       case 'T': add_dir("-T", targdirs, &ntargdirs, eoptarg); break;
       case 'I': add_dir("-I", prelibs, &nprelibs, eoptarg); break;
-      case 'A':
-      case 'L': add_dir("-A", postlibs, &npostlibs, eoptarg); break;
+      case 'A': add_dir("-A", postlibs, &npostlibs, eoptarg); break;
+      case 'P': stackpages = page_count("-P", eoptarg); break;
       case '-': {
         /* long_opt takes the name, with a trailing = where a value follows,
          * and accepts both --name=VALUE and --name VALUE; the value arrives
@@ -750,18 +745,15 @@ int main(int argc, char **argv)
         else if (long_opt("verbose")) g_verbose = 1;
         else if (long_opt("dry-run")) dryrun = 1;
         else if (long_opt("help")) { skhelp(); return 0; }
-        else if (long_opt("version"))
-          { resolve_home(argv[0], 0); version(); return 0; }
-        else if (long_opt("target-dir="))
-          add_dir(elongopt, targdirs, &ntargdirs, eoptarg);
+        else if (long_opt("version")) { resolve_home(argv[0], 0); version(); return 0; }
+        else if (long_opt("target-dir=")) add_dir(elongopt, targdirs, &ntargdirs, eoptarg);
         else if (long_opt("target=")) targdes = eoptarg;
         else if (long_opt("output=")) output = eoptarg;
         else if (long_opt("optimize=")) optlevel = opt_level(elongopt, eoptarg);
-        else if (long_opt("prepend-libdir="))
-          add_dir(elongopt, prelibs, &nprelibs, eoptarg);
-        else if (long_opt("append-libdir="))
-          add_dir(elongopt, postlibs, &npostlibs, eoptarg);
-        else if (long_opt("stack-pages=")) stackpages = page_count(eoptarg);
+        else if (long_opt("prepend-libdir=")) add_dir(elongopt, prelibs, &nprelibs, eoptarg);
+        else if (long_opt("append-libdir=")) add_dir(elongopt, postlibs, &npostlibs, eoptarg);
+        else if (long_opt("stack-pages="))
+          stackpages = page_count(elongopt, eoptarg);
         else if (long_opt("split-funcs=")) splitfuncs = eoptarg;
         else if (long_opt("makefile-dir=")) mdir = eoptarg;
         else eusage("illegal option: --%s", eoptarg);

@@ -11,7 +11,7 @@ skint
 
 marv
   path: ..\marv
-  commit: 0c75509
+  commit: 1fb976c
   date: 2026-11-20
   dirty: no
 
@@ -143,7 +143,7 @@ files
   47850  marv\m.c
   139364  marv\r.c
   144894  marv\v.c
-  60962  marv\a.c
+  61139  marv\a.c
   10563  marv\m.h
   14199  marv\r.h
   1488  marv\v.h

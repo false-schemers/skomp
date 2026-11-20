@@ -28,8 +28,7 @@ second input file is an error.
 | `-O` | `--optimize=LEVEL` | `0`..`3` | Optimization level for the whole pipeline: passed to MARV for the backend C compiler, and to the Scheme compiler as `cp-optimize`. A `cl` target saturates the backend at 2, because MSVC has no `/O3`; the Scheme compiler is told the level as given. Without it, each half keeps its own default. |
 | `-I` | `--prepend-libdir=DIR` | `DIR` | Prepend a Scheme library search directory. |
 | `-A` | `--append-libdir=DIR` | `DIR` | Append a Scheme library search directory. |
-| `-L` | — | `DIR` | Synonym for `-A`. |
-| | `--stack-pages=N` | `N` | The compiled program's root stack, in pages of 65536 eight-byte words (default 128, which is 64 MiB). Minimum 1. |
+| `-P` | `--stack-pages=N` | `N` | The compiled program's root stack, in pages of 65536 eight-byte words (default 128, which is 64 MiB). Minimum 1. |
 | `-K` | `--split-funcs=N` | `N` | Passed to MARV: on a `cc` target, cut the generated C into pieces of at most `N` functions. |
 | `-v` | `--verbose` | *(none)* | Print each command before running it. |
 | `-n` | `--dry-run` | *(none)* | Print the backend commands instead of running them. |
@@ -49,14 +48,15 @@ A `--` argument ends the options, and options come before the input file.
 |---|---|---|
 | input | one or more `.mvs` files and object files | exactly one Scheme program |
 | `-I` | add a local `.mvh` lookup directory | prepend a Scheme library directory |
-| `-L` | add a system `.mvh` and `.c` lookup directory | append a Scheme library directory |
+| `-L` | add a system `.mvh` and `.c` lookup directory | *(not an option)* |
 | `-S` | *(not an option)* | stop after the `.mvs` |
 | `-M DIR` | refuses to overwrite a makefile it recognises | refuses unless `DIR` is empty or absent |
 
 MARV's `-I` and `-L` are not exposed because skomp supplies them itself: the only
 `.mvh` headers and `.c` adapters in play are the Scheme runtime's, which live in
-skomp's own tree. The two letters carry Skint's meanings instead, which is what a
-Scheme program needs.
+skomp's own tree. `-I` carries Skint's meaning instead, which is what a Scheme
+program needs, and `-L` is not a skomp option at all: a Scheme library directory
+is prepended with `-I` or appended with `-A`.
 
 ## Operating modes
 
@@ -115,7 +115,7 @@ skomp sets four environment variables for the programs it runs, and nothing
 else. They apply to those children only.
 
   * `SKINT_LIBDIRS` is **set**, not extended: the `-I` directories, then
-    skomp's own library directory, then the `-A` and `-L` ones. A value
+    skomp's own library directory, then the `-A` ones. A value
     inherited from your shell cannot add a library the compiler would then
     serve.
   * `PATH` gains skomp's own `bin` directory at the front, so MARV's stock

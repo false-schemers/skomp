@@ -54,14 +54,7 @@ Prepend \fIDIR\fR to the Scheme library search path.
 .BR \-A ", " \-\-append\-libdir =\fIDIR\fR
 Append \fIDIR\fR to the Scheme library search path.
 .TP
-.BI \-L " DIR"
-Synonym for \fB\-A\fR.
-.TP
-.BI \-\-scheme\-optimize= N
-The compiler's own optimization level, 0..3.  Default is 1; the other levels
-are accepted and validated but not yet interpreted.
-.TP
-.BI \-\-stack\-pages= N
+.BR \-P ", " \-\-stack\-pages =\fIN\fR
 The size of the compiled program's root stack, in pages.  A page is 65536
 words of eight bytes, so the default of 128 pages is 64 MiB.  The minimum is
 1.  The stack is a BSS segment, so its pages are touched only as the stack
