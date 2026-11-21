@@ -506,9 +506,6 @@ static int mvt_obj_ext(const char *mvtpath, char *dst, size_t cap)
 }
 
 /* ---------------------------------------------------------------- */
-/* usage                                                            */
-
-/* ---------------------------------------------------------------- */
 /* the option parser                                                */
 /*                                                                  */
 /* egetopt, copied from marv (m.c), so that skomp answers to the    */
@@ -520,9 +517,6 @@ static int mvt_obj_ext(const char *mvtpath, char *dst, size_t cap)
 /*                                                                  */
 /* skomp links none of marv, so this is a copy rather than a share; */
 /* that it stays a copy of THAT parser is the whole point of it.    */
-/* The two departures from the original: int where marv has bool,   */
-/* because this file uses no <stdbool.h>, and the stored strings    */
-/* are kept rather than duplicated, because both are literals here. */
 /* [cco] */
 
 static const char *g_progname = "skomp";
@@ -532,7 +526,6 @@ static const char *progname(void) { return g_progname; }
 static const char *usage(void) { return g_usage; }
 static void setusage(const char *str) { g_usage = str; }
 
-/* eusage: report wrong usage, then exit */
 static void eusage(const char *fmt, ...)
 {
   va_list args;
@@ -567,7 +560,7 @@ static char g_elongbuf[64];
 
 static int egetopt(int argc, char *argv[], const char *opts)
 {
-  int c; char *popt;
+  int c; const char *popt;
 
   /* long_opt needs these to reach a separated option argument */
   g_eargc = argc; g_eargv = argv;
@@ -678,21 +671,6 @@ static int long_opt(const char *lopt)
   eoptarg = g_eargv[eoptind++];
   return 1;
 }
-
-static int streql(const char *s1, const char *s2)
-{
-  if (s1 == NULL && s2 == NULL) return 1;
-  if (s1 == NULL || s2 == NULL) return 0;
-  return strcmp(s1, s2) == 0;
-}
-
-static char *strprf(const char *str, const char *prefix)
-{
-  while (*str && *str == *prefix) ++str, ++prefix;
-  if (*prefix) return NULL;
-  return (char *)str;
-}
-
 
 static void version(void)
 {
