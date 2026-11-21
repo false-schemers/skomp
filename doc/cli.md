@@ -104,6 +104,9 @@ skomp -M build -o app app.scm
 make -C build
 ```
 
+On a `cl` target the makefile is an `nmakefile`, so the second line is
+`nmake -f nmakefile` run from inside `DIR`.
+
 skomp requires `DIR` to be empty or not yet to exist, and says so otherwise.
 MARV cannot make that check: it is written in the C subset WCPL accepts, which
 has no way to read a directory, so MARV can only refuse to overwrite a makefile
@@ -140,10 +143,15 @@ order:
 
 1. `SKOMP_HOME`, if it is set;
 2. the path compiled in at build time (`-D SKOMP_HOME_DIR=...`, which the
-   makefile sets to `$(PREFIX)/libexec/skomp`);
-3. `skomp-home` beside the `skomp` executable itself, when `argv[0]` carries a
-   directory. This is what makes an unpacked tree work where it stands, and
-   what `make` leaves behind.
+   Un*x makefile sets to `$(PREFIX)/libexec/skomp` and the nmakefile leaves
+   unset unless `SKOMPHOME` is given);
+3. `skomp-home` beside the `skomp` executable itself. This is what makes an
+   unpacked tree work where it stands, and what `make` leaves behind. Where
+   that executable is comes from the system on Windows, and from `argv[0]`
+   elsewhere; when `argv[0]` is a bare name, which is what a shell hands over
+   after finding skomp on `PATH`, `PATH` is walked for it. A copy with no tree
+   beside it is reported as not found, rather than borrowing the tree of
+   another copy further along `PATH`.
 
 Paths skomp passes to MARV, and that MARV passes to the backend compiler, are
 limited to ASCII letters and digits, space, `_`, `-`, `.`, `/`, `\` and `:`.

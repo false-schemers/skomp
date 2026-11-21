@@ -85,7 +85,35 @@ Notes on the flags:
 Windows (MSVC / MinGW)
 ----------------------
 
-**MSVC**, from a Developer Command Prompt in the repository root:
+**MSVC**, from a Developer Command Prompt, or from any shell that has run
+`vcvars64.bat`, in the repository root:
+
+```bat
+nmake -f nmakefile
+nmake -f nmakefile test
+```
+
+The `-f` is not optional. Without it `nmake` reads `Makefile`, which is written
+in GNU make's language; Windows filenames are not case-sensitive, so that is
+the file a bare `nmake` finds. `nmake -f nmakefile clean` removes the build
+products, including the object files MSVC leaves in the working directory when
+skomp builds a program.
+
+The build calls nothing but `cl`, and `test` additionally needs `bash`, which
+comes with Git for Windows. Both are expected on `PATH`.
+
+Macros the build takes on the command line:
+
+| macro | for |
+|---|---|
+| `NANBOX=` | a 32-bit host, which cannot box a value in a NaN |
+| `SKOMPHOME=C:/tools/skomp/skomp-home` | compiling in where the private tree will live, for a copy of `skomp.exe` that is not beside its own tree. Forward slashes: the value becomes a C string literal |
+| `CFLAGS=/nologo /W3 /Od /Zi` | a debug build |
+
+A macro is not a dependency, so changing one does not by itself rebuild
+anything: delete the executable in question first.
+
+**By hand**, if you would rather spell it out:
 
 ```bat
 mkdir skomp-home\bin
@@ -98,7 +126,11 @@ xcopy /e /i /y target skomp-home\target
 cl /nologo /O2 /DNDEBUG /Fe"skomp.exe" skomp.c
 ```
 
-**MinGW** uses the Un\*x flags with `-o skomp.exe`.
+That leaves the object files in the repository root. The nmakefile gives `cl` a
+`/Fo` directory per part instead, which keeps them out of the way; `/Fo` naming
+a file rather than a directory is rejected when more than one source is given.
+
+**MinGW** uses the Un\*x flags with `-o skomp.exe`, and GNU make's `Makefile`.
 
 There is no installer. Put `skomp.exe` wherever you like with `skomp-home`
 beside it, and add that directory to `PATH`:

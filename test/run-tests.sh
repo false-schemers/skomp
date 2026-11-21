@@ -9,7 +9,10 @@
 # tree to be installed: ./skomp finds ./skomp-home beside itself.
 set -u
 
-SKOMP=${SKOMP:-./skomp}
+# The Windows build writes skomp.exe, the Un*x one skomp. [cco]
+if [ -z "${SKOMP:-}" ]; then
+  if [ -x ./skomp.exe ]; then SKOMP=./skomp.exe; else SKOMP=./skomp; fi
+fi
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/skomp-test.XXXXXX")
 pass=0; fail=0; skip=0
 

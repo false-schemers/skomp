@@ -37,10 +37,20 @@ make test
 sudo make install
 ```
 
-`make` builds all four parts and leaves a runnable tree in the repository:
-`./skomp` finds `./skomp-home` beside itself, so nothing has to be installed to
-try it out. See [INSTALL.md](INSTALL.md) for the install prefix, for Windows,
-and for building the parts by hand.
+On Windows, from a shell that reaches `cl.exe`:
+
+```
+git clone https://github.com/false-schemers/skomp.git
+cd skomp
+nmake -f nmakefile
+nmake -f nmakefile test
+```
+
+Either build leaves a runnable tree in the repository: `skomp` finds
+`skomp-home` beside itself, so nothing has to be installed to try it out.
+There is nothing to install on Windows -- copy the two of them wherever you
+want them. See [INSTALL.md](INSTALL.md) for the install prefix, for the
+Windows layout, and for building the parts by hand.
 
 ## Use
 

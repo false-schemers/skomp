@@ -1,0 +1,115 @@
+# skomp -- Windows build with MSVC.  The Makefile beside this one is GNU
+# make's, for Un*x; this is the same build spelled for nmake.
+#
+#   nmake -f nmakefile            build skomp.exe and the private tree
+#   nmake -f nmakefile test       compile and run the end-to-end tests
+#   nmake -f nmakefile clean      remove the build products
+#
+# The -f is not optional: without it nmake reads Makefile, which is written in
+# GNU make's language.  Windows filenames are not case-sensitive, so `nmake'
+# on its own finds that file rather than this one.
+#
+# Everything the build calls is expected on PATH: cl.exe to compile, and for
+# `test', bash, which comes with Git for Windows.  A Developer Command Prompt
+# provides cl; so does any shell that has run vcvars64.bat.  The compiled
+# skomp calls cl too, since cl is the default target on Windows.
+#
+# `nmake' leaves a runnable tree in the repository: skomp.exe finds skomp-home
+# beside itself, so nothing has to be installed to try it out.  There is no
+# install target, because there is nothing to install -- copy skomp.exe and
+# skomp-home wherever you want them, as INSTALL.md describes.
+#
+# Macros worth overriding on the command line:
+#
+#   NANBOX=                       for a 32-bit host, which cannot box in a NaN
+#   SKOMPHOME=C:/tools/skomp/skomp-home
+#                                 compile that path in as where the private
+#                                 tree lives, for a copy of skomp.exe that is
+#                                 not beside its own tree.  Forward slashes:
+#                                 the value becomes a C string literal.
+#   CFLAGS=/nologo /W3 /Od /Zi    a debug build
+
+CC        = cl
+CFLAGS    = /nologo /W3 /O2 /DNDEBUG
+NANBOX    = /D NAN_BOXING
+SKOMPHOME =
+HOME_DIR  = skomp-home
+OBJ_DIR   = obj
+
+# skint and skomp.c define _CRT_SECURE_NO_WARNINGS themselves; marv and wcpl
+# do not, and MSVC's deprecation notices for fopen and getenv would otherwise
+# bury the build log.
+QUIET_CRT = /D _CRT_SECURE_NO_WARNINGS
+
+!IF "$(SKOMPHOME)" != ""
+HOMEDEF = /D SKOMP_HOME_DIR=\"$(SKOMPHOME)\"
+!ELSE
+HOMEDEF =
+!ENDIF
+
+# The hosted interpreter: full numeric tower and full Unicode are NOT
+# optional.  srt strings are arrays of codepoints, so an ASCII host would read
+# a multi-byte literal in a source file as several characters and compile a
+# different program; and the code generator carries 32-bit constants that want
+# exact arithmetic.  OPT_ENHTTY is absent on purpose -- skomp never enters a
+# REPL, and opt/n_enhtty.* is not imported.
+SKINT_CFLAGS = $(CFLAGS) $(NANBOX) /D OPT_TOWER /D OPT_UNICODE
+SKINT_SRC    = skint\s.c skint\k.c skint\i.c skint\n.c skint\t.c
+MARV_SRC     = marv\m.c marv\r.c marv\v.c marv\a.c
+WCPL_SRC     = wcpl\c.c wcpl\l.c wcpl\p.c wcpl\w.c
+
+# marv is built WITHOUT /D PREFIX: every path skomp hands it is absolute,
+# including the .mvt, so it needs no lookup defaults of its own.
+
+all: skomp.exe home
+
+skomp.exe: skomp.c skomp_src.h
+	@if not exist $(OBJ_DIR)\skomp mkdir $(OBJ_DIR)\skomp
+	$(CC) $(CFLAGS) $(HOMEDEF) /Fo$(OBJ_DIR)\skomp\ /Fe$@ skomp.c
+
+home: $(HOME_DIR)\bin\skint.exe $(HOME_DIR)\bin\marv.exe \
+      $(HOME_DIR)\bin\wcpl.exe homedata
+
+# Each part compiles into its own object directory, which keeps the objects out
+# of the repository root.  /Fo has to name a directory and not a file, because
+# cl rejects a named object file when it is given more than one source.
+$(HOME_DIR)\bin\skint.exe: $(SKINT_SRC)
+	@if not exist $(HOME_DIR)\bin mkdir $(HOME_DIR)\bin
+	@if not exist $(OBJ_DIR)\skint mkdir $(OBJ_DIR)\skint
+	$(CC) $(SKINT_CFLAGS) /Fo$(OBJ_DIR)\skint\ /Fe$@ $(SKINT_SRC)
+
+$(HOME_DIR)\bin\marv.exe: $(MARV_SRC)
+	@if not exist $(HOME_DIR)\bin mkdir $(HOME_DIR)\bin
+	@if not exist $(OBJ_DIR)\marv mkdir $(OBJ_DIR)\marv
+	$(CC) $(CFLAGS) $(QUIET_CRT) /Fo$(OBJ_DIR)\marv\ /Fe$@ $(MARV_SRC)
+
+$(HOME_DIR)\bin\wcpl.exe: $(WCPL_SRC)
+	@if not exist $(HOME_DIR)\bin mkdir $(HOME_DIR)\bin
+	@if not exist $(OBJ_DIR)\wcpl mkdir $(OBJ_DIR)\wcpl
+	$(CC) $(CFLAGS) $(QUIET_CRT) /Fo$(OBJ_DIR)\wcpl\ /Fe$@ $(WCPL_SRC)
+
+# The data half of the private tree: the compiler library and the target
+# descriptions, copied rather than compiled.  nmake cannot be told to depend
+# on a directory's contents, so this runs every time and the old copy goes
+# first -- a library file deleted upstream must not survive in the tree.
+homedata:
+	@if not exist $(HOME_DIR) mkdir $(HOME_DIR)
+	@if exist $(HOME_DIR)\lib rmdir /s /q $(HOME_DIR)\lib
+	@if exist $(HOME_DIR)\target rmdir /s /q $(HOME_DIR)\target
+	@xcopy /E /I /Q /Y lib $(HOME_DIR)\lib >nul
+	@xcopy /E /I /Q /Y target $(HOME_DIR)\target >nul
+
+test: all
+	bash test/run-tests.sh
+
+# marv_*.obj and the two runtime objects are left in the working directory by
+# cl when skomp builds a program: the backend command carries no /Fo.
+clean:
+	@if exist skomp.exe del /q skomp.exe
+	@if exist $(OBJ_DIR) rmdir /s /q $(OBJ_DIR)
+	@if exist $(HOME_DIR) rmdir /s /q $(HOME_DIR)
+	@del /q marv_*.obj scmrt.obj scmi.obj 2>nul
+
+realclean: clean
+
+distclean: realclean

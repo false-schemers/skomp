@@ -115,6 +115,36 @@ static int exit_code(int rc)
 static int exit_code(int rc) { return rc == 0 ? 0 : 1; }
 #endif
 
+/* Where this executable is.  argv[0] does not always say: cmd.exe passes
+ * the bare name a command was typed as, so a skomp started through PATH
+ * gets "skomp" and has no directory to look beside -- which is how the
+ * documented layout, skomp.exe with skomp-home next to it on PATH, failed
+ * to find its own tree.  Windows can be asked outright.  Elsewhere this
+ * answers 0 and the caller falls back to argv[0] and to a PATH walk. */
+#ifndef __WCPL__
+#ifdef _WIN32
+static int self_path(char *dst, size_t cap)
+{
+  DWORD n;
+  n = GetModuleFileNameA(NULL, dst, (DWORD)cap);
+  if (n == 0 || n >= (DWORD)cap) { dst[0] = 0; return 0; }
+  return 1;
+}
+#else
+static int self_path(char *dst, size_t cap)
+{
+  if (cap > 0) dst[0] = 0;
+  return 0;
+}
+#endif
+#else
+static int self_path(char *dst, size_t cap)
+{
+  if (cap > 0) dst[0] = 0;
+  return 0;
+}
+#endif
+
 /* ---------------------------------------------------------------- */
 /* strings and paths                                                */
 
@@ -197,6 +227,55 @@ static int file_readable(const char *path)
   return 1;
 }
 
+/* Look NAME up on PATH, as the shell did a moment ago, and answer the first
+ * directory that holds it.  This is for the hosts where self_path cannot
+ * say, and only for a name with no directory in it.  On Windows a name is
+ * typed without .exe, so that spelling is tried as well. */
+static int path_lookup(char *dst, size_t cap, const char *name)
+{
+  const char *p;
+  char sep;
+  char dir[MAXPATH];
+  char alt[MAXPATH];
+  const char *names[2];
+  size_t n, i, k;
+  p = getenv("PATH");
+  if (p == NULL || name[0] == 0) return 0;
+  sep = list_sep()[0];
+  names[0] = name;
+  names[1] = NULL;
+  if (host_windows() && !has_suffix(name, ".exe")) {
+    n = strlen(name);
+    if (n + 5 <= sizeof(alt)) {
+      memcpy(alt, name, n);
+      memcpy(alt + n, ".exe", 5);
+      names[1] = alt;
+    }
+  }
+  while (*p != 0) {
+    n = 0;
+    while (p[n] != 0 && p[n] != sep) n++;
+    if (n > 0 && n + 1 <= sizeof(dir)) {
+      memcpy(dir, p, n);
+      dir[n] = 0;
+      for (i = 0; i < 2; i++) {
+        if (names[i] == NULL) continue;
+        if (path_join(dst, cap, dir, names[i]) && file_readable(dst)) {
+          /* the first directory holding it is the copy that ran: an
+           * earlier one without a tree beside it is still the answer,
+           * and the caller reports that rather than using a stranger. */
+          return 1;
+        }
+      }
+    }
+    k = n;
+    if (p[k] == sep) k++;
+    p += k;
+  }
+  if (cap > 0) dst[0] = 0;
+  return 0;
+}
+
 /* ---------------------------------------------------------------- */
 /* quoting                                                          */
 
@@ -241,8 +320,9 @@ static int buf_add_path(buf_t *b, const char *path)
 
 /* Three sources, in order: the environment, the path compiled in by the
  * makefile, and -- so that an unpacked tree works where it stands -- the
- * directory holding skomp itself, with "skomp-home" under it.  No discovery
- * API is used; argv[0] is consulted only when it carries a directory. */
+ * directory holding skomp itself, with "skomp-home" under it.  That last
+ * one needs to know where skomp is, which self_path answers on Windows and
+ * argv[0] answers elsewhere, falling back to a PATH walk for a bare name. */
 static char g_home[MAXPATH];
 
 static int home_has(const char *home, const char *rel)
@@ -263,6 +343,7 @@ static int resolve_home(const char *argv0, int complain)
   const char *e;
   char dir[MAXPATH];
   char cand[MAXPATH];
+  char self[MAXPATH];
   e = getenv("SKOMP_HOME");
   if (e != NULL && e[0] != 0) {
     if (strlen(e) + 1 > sizeof(g_home)) {
@@ -278,7 +359,13 @@ static int resolve_home(const char *argv0, int complain)
     return 1;
   }
 #endif
-  path_dir(dir, sizeof(dir), argv0);
+  if (self_path(self, sizeof(self))) {
+    path_dir(dir, sizeof(dir), self);
+  } else {
+    path_dir(dir, sizeof(dir), argv0);
+    if (dir[0] == 0 && path_lookup(self, sizeof(self), argv0))
+      path_dir(dir, sizeof(dir), self);
+  }
   if (dir[0] != 0 && path_join(cand, sizeof(cand), dir, "skomp-home") &&
       home_ok(cand)) {
     strcpy(g_home, cand);
