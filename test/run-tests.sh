@@ -215,6 +215,19 @@ else
   bad "-D adds a cond-expand feature" "$(head -2 "$WORK/feat.out")"
 fi
 
+# and the program's own (features) answers the same list cond-expand was told
+printf '%s\n' \
+  '(import (scheme base) (scheme write))' \
+  '(write (features))' \
+  '(newline)' > "$WORK/flist.scm"
+if "$SKOMP" -D my-build -o "$WORK/flist" "$WORK/flist.scm" >/dev/null 2>&1 &&
+   runp "$WORK/flist" > "$WORK/flist.out" 2>&1 &&
+   grep -q "my-build" "$WORK/flist.out" && grep -q "debug" "$WORK/flist.out"; then
+  ok "(features) answers the compiled feature list"
+else
+  bad "(features) answers the compiled feature list" "$(head -2 "$WORK/flist.out")"
+fi
+
 # a -D name that is not one is refused before anything is compiled
 if "$SKOMP" -D 'no such feature' -o "$WORK/x" "$WORK/feat.scm" \
      > "$WORK/dbad.err" 2>&1; then

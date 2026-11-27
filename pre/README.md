@@ -41,7 +41,7 @@ target descriptions are read by the compiler's output.
 
 | part | version |
 |---|---|
-| skint | 0.8.6 (`9d5d8d7`, 26 Nov 2026) |
+| skint | 0.8.6 (`219290d`, 26 Nov 2026) |
 | marv | `6c4becd`, 26 Nov 2026 |
 | wcpl | `c1af82f`, 26 Nov 2026 |
 

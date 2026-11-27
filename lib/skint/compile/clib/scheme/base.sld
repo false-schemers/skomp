@@ -1482,9 +1482,14 @@
                 [else (vector-set! v i (car l))
                       (loop (+ i 1) (cdr l))]))))
 
-    ;; a compiled program's feature list: R7RS on a little-endian
-    ;; unix host, with no ratios/complex in the numeric tower
-    (define (features) '(r7rs linux little-endian))
+    ;; A compiled program's feature list, which is the list the
+    ;; compiler expanded it against: %cp-features% is replaced by a
+    ;; quotation of cp-features as this file is read, so (features)
+    ;; and cond-expand cannot disagree.  Nothing of the host or of the
+    ;; target is added to it: one module is assembled for any of
+    ;; MARV's targets, so the compiler is in no position to claim an
+    ;; operating system, and -D is how a caller who knows claims one.
+    (define (features) %cp-features%)
 
     (define (bytevector-append . bvs)
       (let ([bv (make-bytevector

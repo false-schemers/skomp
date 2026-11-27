@@ -184,10 +184,30 @@
 ;; *library-directory-list*: a lookup that reaches this environment is
 ;; answered from the compiler's own tree, and every other lookup is
 ;; delegated untouched.  [cco]
+;; The compiler's own clib sources carry one expansion-time hole.
+;; %cp-features% stands for the list cp-features was set to, and is
+;; replaced by a quotation of it as the library's text is read; that is
+;; how a compiled program's own (features) comes to answer the list its
+;; cond-expand was answered from.  Nothing else is needed from the rest
+;; of the compiler: a quoted list is a literal like any other, so the
+;; literal collector finds it, the serializer writes it into the blob,
+;; and the deserializer builds it at startup.
+;;
+;; The hole exists in clib/ and nowhere else.  A program's own forms do
+;; not come through here, so a program that writes %cp-features% is
+;; writing an ordinary unbound name.  There is one hole and one name
+;; deliberately: a substitution mechanism grows into a preprocessor if
+;; it is given a syntax. [cco]
+(define (cp-splice-features sexps)
+  (let walk ([x sexps])
+    (cond [(pair? x) (let ([a (walk (car x))]) (cons a (walk (cdr x))))]
+          [(eq? x '%cp-features%) (list 'quote (cp-features))]
+          [else x])))
+
 (define (cp-fetch-library-at listname filepath sld-env)
   (with-current-file filepath
     (lambda ()
-      (let ([sexps (read-file-sexps filepath #f)])
+      (let ([sexps (cp-splice-features (read-file-sexps filepath #f))])
         (unless (sexp-match? '((define-library * * ...)) sexps)
           (error "shadow library: unexpected forms in .sld file"
                  listname filepath))

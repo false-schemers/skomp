@@ -90,10 +90,15 @@ The feature identifiers the program is compiled against. The default is
 ```
 
 `cond-expand`, in the program and in every library it imports, is answered from
-this list. The list describes the world a compiled program runs in, which is
+this list, and so is the `features` procedure a compiled program calls at run
+time: the list is written into the module as a literal, so the two cannot
+disagree. The list describes the world a compiled program runs in, which is
 not the world of the interpreter compiling it: there is no numeric tower above
 the fixnums and flonums, and no C99 or XSI mathematics, so those identifiers
-are absent and the branches that test them are not taken. Tests of the form
+are absent and the branches that test them are not taken. Nothing of the host or of the target is added to the
+list: one module is assembled for any of the backends, so the compiler is in no
+position to claim an operating system or a byte order, and a caller who knows
+which one it will be adds the identifier. Tests of the form
 `(library (srfi 1))` are answered elsewhere, from the libraries a compiled
 program can import. It is an error to set the parameter to anything that is not
 a list of symbols.

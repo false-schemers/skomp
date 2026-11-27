@@ -34,9 +34,12 @@
 ;;;                 against, a list of symbols, default (r7rs skint
 ;;;                 full-unicode debug).  cond-expand in the program
 ;;;                 and in every library it imports is answered from
-;;;                 this list, which describes the world a standalone
-;;;                 MARV executable provides rather than the host
-;;;                 interpreter's.  `debug` is in the default, and it
+;;;                 this list, and so is the features procedure the
+;;;                 compiled program calls at run time.  The list
+;;;                 describes the world a standalone MARV executable
+;;;                 provides rather than the host interpreter's, and
+;;;                 nothing of the host or the target is added to it:
+;;;                 one module is assembled for any backend.  `debug` is in the default, and it
 ;;;                 is what makes (srfi 145)'s assume check its
 ;;;                 expression; a caller that wants the assumptions
 ;;;                 compiled away leaves it out.  Library tests,

@@ -58,6 +58,13 @@ and each `-D FEATURE` adds one name to it, which is what SRFI 138's `-D`
 means. The names are added in the order they were written, and a name already
 there is not added twice. Nothing but the Scheme half sees them.
 
+The same list is what a compiled program's own `(features)` answers: it is
+written into the module as a literal, so what `cond-expand` was told and what
+the program reports cannot disagree. Nothing of the host or of the target is
+added to it -- one MARV module is assembled for any of the targets, so skomp is
+in no position to claim an operating system or a byte order, and `-D linux` is
+how a caller who knows claims one.
+
 `debug` is in the default, and it is the one name with a visible effect on a
 program that mentions no feature at all: `(srfi 145)`'s `assume` elides its
 check when neither `assumptions` nor `debug` is a feature, so with the default

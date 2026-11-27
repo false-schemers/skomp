@@ -5,7 +5,7 @@ Written by pre/import.ssc.  Do not edit.
 
 skint
   path: ..\skint
-  commit: 9d5d8d7
+  commit: 219290d
   date: 2026-11-26
   dirty: no
 
@@ -36,12 +36,12 @@ files
   8848  skint/opt\n_tower.h
   67097  skint/opt\n_unicode.c
   2361  skint/opt\n_unicode.h
-  7531  lib/skint/compile.sld
-  10496  lib/skint/compile/README.md
+  7766  lib/skint/compile.sld
+  10905  lib/skint/compile/README.md
   55792  lib/skint\compile/cups-base.scm
   5440  lib/skint\compile/cups-signatures.scm
   58871  lib/skint\compile/cups-passes.scm
-  21540  lib/skint\compile/cups-front.scm
+  22650  lib/skint\compile/cups-front.scm
   223263  lib/skint\compile/cups-dsmarv.scm
   41565  lib/skint/compile/srt\scmi.c
   107283  lib/skint/compile/srt\scmi.mvh
@@ -49,7 +49,7 @@ files
   192587  lib/skint/compile/srt\scmrt.c
   2820  lib/skint/compile/srt\scmrt.h
   9932  lib/skint/compile/srt\scmrt.mvh
-  92742  lib/skint/compile/clib\scheme/base.sld
+  93080  lib/skint/compile/clib\scheme/base.sld
   2213  lib/skint/compile/clib\scheme/case-lambda.sld
   9258  lib/skint/compile/clib\scheme/char.sld
   10551  lib/skint/compile/clib\scheme/cxr.sld
