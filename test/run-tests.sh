@@ -20,6 +20,9 @@ say()  { printf '%s\n' "$*"; }
 ok()   { pass=$((pass+1)); printf '  [ok]   %s\n' "$1"; }
 bad()  { fail=$((fail+1)); printf '  [FAIL] %s\n' "$1"; shift; for l in "$@"; do printf '         %s\n' "$l"; done; }
 skipt(){ skip=$((skip+1)); printf '  [skip] %s -- %s\n' "$1" "$2"; }
+# A linker names the product: MSVC's /Fe adds .exe to a name without a
+# suffix, so a test that runs what it compiled has to look for both. [cco]
+runp() { if [ -x "$1" ]; then "$1"; else "$1.exe"; fi; }
 
 cleanup() { rm -rf "$WORK"; }
 trap cleanup EXIT
@@ -76,6 +79,16 @@ if "$SKOMP" -c -o "$WORK/named.c" "$WORK/obj.scm" >/dev/null 2>&1 &&
   ok "-c honours -o"
 else
   bad "-c honours -o"
+fi
+
+# without -o the executable is named after the input and the target, which is
+# what SRFI 138 asks of compile-r7rs: prog.scm compiles to prog
+cp test/t01-base.scm "$WORK/derived.scm"
+if "$SKOMP" "$WORK/derived.scm" > "$WORK/derived.err" 2>&1 &&
+   { [ -s "$WORK/derived" ] || [ -s "$WORK/derived.exe" ]; }; then
+  ok "no -o names the executable after the input"
+else
+  bad "no -o names the executable after the input" "$(head -2 "$WORK/derived.err")"
 fi
 
 # -M into a fresh directory builds; into a non-empty one is refused.
@@ -153,6 +166,63 @@ if "$SKOMP" -o "$WORK/bad" "$WORK/bad.scm" >/dev/null 2>&1; then
   bad "a compile error exits non-zero" "it exited 0"
 else
   ok "a compile error exits non-zero"
+fi
+
+# ------------------------------------------------------------------ features
+say "=== features ==="
+
+# `debug' is a feature by default, so (srfi 145)'s assume checks its
+# expression; -D NDEBUG takes it away, and the same program runs through.
+printf '%s\n' \
+  '(import (scheme base) (scheme write) (srfi 145))' \
+  '(define (f x) (assume (number? x) "not a number") (display "ok") (newline))' \
+  '(f "s")' > "$WORK/assume.scm"
+if ! "$SKOMP" -o "$WORK/assume" "$WORK/assume.scm" > "$WORK/assume.err" 2>&1; then
+  bad "assume checks with the default features" "$(head -2 "$WORK/assume.err")"
+elif runp "$WORK/assume" > "$WORK/assume.out" 2>&1; then
+  bad "assume checks with the default features" "it exited 0"
+elif grep -q "Assumption failed" "$WORK/assume.out"; then
+  ok "assume checks with the default features"
+else
+  bad "assume checks with the default features" "$(head -2 "$WORK/assume.out")"
+fi
+if "$SKOMP" -D NDEBUG -o "$WORK/nassume" "$WORK/assume.scm" >/dev/null 2>&1 &&
+   runp "$WORK/nassume" > "$WORK/nassume.out" 2>&1 &&
+   tr -d '\r' < "$WORK/nassume.out" | grep -q '^ok$'; then
+  ok "-D NDEBUG compiles the assumption away"
+else
+  bad "-D NDEBUG compiles the assumption away" "$(head -2 "$WORK/nassume.out")"
+fi
+
+# and NDEBUG reaches the backend as well, where the target's ~D says it goes
+if "$SKOMP" -n -v -D NDEBUG -o "$WORK/nd" "$WORK/assume.scm" 2>&1 |
+     grep -q -- "-DNDEBUG"; then
+  ok "-D NDEBUG reaches the target compiler"
+else
+  bad "-D NDEBUG reaches the target compiler" "no -DNDEBUG in the backend command"
+fi
+
+# a -D name of the caller's own is a cond-expand feature and nothing more
+printf '%s\n' \
+  '(import (scheme base) (scheme write))' \
+  '(cond-expand (my-build (display "with")) (else (display "without")))' \
+  '(newline)' > "$WORK/feat.scm"
+if "$SKOMP" -D my-build -o "$WORK/feat" "$WORK/feat.scm" >/dev/null 2>&1 &&
+   runp "$WORK/feat" > "$WORK/feat.out" 2>&1 &&
+   tr -d '\r' < "$WORK/feat.out" | grep -q '^with$'; then
+  ok "-D adds a cond-expand feature"
+else
+  bad "-D adds a cond-expand feature" "$(head -2 "$WORK/feat.out")"
+fi
+
+# a -D name that is not one is refused before anything is compiled
+if "$SKOMP" -D 'no such feature' -o "$WORK/x" "$WORK/feat.scm" \
+     > "$WORK/dbad.err" 2>&1; then
+  bad "a -D name that needs quoting is refused" "it did not refuse"
+elif grep -q "a feature name takes" "$WORK/dbad.err"; then
+  ok "a -D name that needs quoting is refused"
+else
+  bad "a -D name that needs quoting is refused" "$(head -2 "$WORK/dbad.err")"
 fi
 
 # ------------------------------------------------------------------ packaging

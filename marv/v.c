@@ -1000,7 +1000,9 @@ static void deps_line(tt_t t, FILE *fp)
   size_t d;
   if (sys_count() == 0) return;
   fprintf(fp, "%smarv-sys-deps:", tt_comment(t));
-  for (d = 0; d < sys_count(); ++d) fprintf(fp, " %s", sys_name(d));
+  /* the relative name, not the module name: a link reading this back has to
+   * resolve it again on its own -L path */
+  for (d = 0; d < sys_count(); ++d) fprintf(fp, " %s", sys_rel(d));
   if (t == TT_CC) fputs(" */", fp);
   fputs("\n", fp);
 }
@@ -1543,17 +1545,14 @@ static void wo_form(snode_t *pn, int ind, FILE *fp)
 
   if (streql(h, "block") || streql(h, "loop")) {
     size_t k;
+    sym_t label;
+    vt_t rt;
     const char *lbl;
-    k = 1;
-    lbl = NULL;
-    if (k < snlen(pn) && snref(pn, k)->nt == SN_SYM) { lbl = symname(snref(pn, k)->sym); k += 1; }
+    ctrl_head(pn, streql(h, "loop"), &label, &rt, &k);
+    lbl = (label != 0) ? symname(label) : NULL;
     wo_ind(ind, fp);
     fprintf(fp, "%s%s%s", h, (lbl != NULL) ? " " : "", (lbl != NULL) ? lbl : "");
-    if (k < snlen(pn) && snref(pn, k)->nt == SN_LIST && snlen(snref(pn, k)) == 2
-        && streql(symname(snref(snref(pn, k), 0)->sym), "result")) {
-      fprintf(fp, " (result %s)", wo_type(vt_of_sym(snref(snref(pn, k), 1)->sym)));
-      k += 1;
-    }
+    if (rt != VT_VOID) fprintf(fp, " (result %s)", wo_type(rt));
     fputs("\n", fp);
     for (; k < snlen(pn); ++k) wo_form(snref(pn, k), ind, fp);
     wo_ind(ind, fp);

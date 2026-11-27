@@ -81,6 +81,30 @@ report comes before anything is written past the segment. `apply` checks its
 own frame before spreading the argument list, because that is the one frame
 whose size the argument count decides rather than the code generator.
 
+`(cp-features)` → *list of symbols*
+
+The feature identifiers the program is compiled against. The default is
+
+```scheme
+(r7rs skint full-unicode debug)
+```
+
+`cond-expand`, in the program and in every library it imports, is answered from
+this list. The list describes the world a compiled program runs in, which is
+not the world of the interpreter compiling it: there is no numeric tower above
+the fixnums and flonums, and no C99 or XSI mathematics, so those identifiers
+are absent and the branches that test them are not taken. Tests of the form
+`(library (srfi 1))` are answered elsewhere, from the libraries a compiled
+program can import. It is an error to set the parameter to anything that is not
+a list of symbols.
+
+`debug` is the one identifier in the default that changes a program mentioning
+no feature at all. `assume`, from SRFI 145, elides its check when neither
+`assumptions` nor `debug` is there, so with the default an assumption is
+checked and a program that breaks one reports it and exits. Leaving `debug` out
+compiles the assumptions away, which is the state a C program reaches by
+defining `NDEBUG`.
+
 ### What it emits
 
 The module is named `$ds$program`. The name is fixed rather than taken from the

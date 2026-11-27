@@ -4578,8 +4578,8 @@
 ;; accumulates the first program's units, globals and literals, which
 ;; would pass any test that compiles once per process and fail the
 ;; moment anyone compiles twice.  Config that the caller sets --
-;; *ds-balance*, *ds-dedup?*, *ds-trampoline?*, *ds-features* -- is
-;; deliberately NOT reset here. [cco]
+;; *ds-balance*, *ds-dedup?*, *ds-trampoline?* and the cp-
+;; parameters -- is deliberately NOT reset here. [cco]
 (define (ds-reset!)
   (set! *ds-op* #f)
   (set! *ds-procs* '())

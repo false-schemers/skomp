@@ -5,20 +5,20 @@ Written by pre/import.ssc.  Do not edit.
 
 skint
   path: ..\skint
-  commit: 3618886
-  date: 2026-11-19
+  commit: 9d5d8d7
+  date: 2026-11-26
   dirty: no
 
 marv
   path: ..\marv
-  commit: 1fb976c
-  date: 2026-11-20
+  commit: 6c4becd
+  date: 2026-11-26
   dirty: no
 
 wcpl
   path: ..\WCPL\wcpl
-  commit: a1145ee
-  date: 2026-11-14
+  commit: c1af82f
+  date: 2026-11-26
   dirty: no
 
 files
@@ -36,13 +36,13 @@ files
   8848  skint/opt\n_tower.h
   67097  skint/opt\n_unicode.c
   2361  skint/opt\n_unicode.h
-  6714  lib/skint/compile.sld
-  9350  lib/skint/compile/README.md
+  7531  lib/skint/compile.sld
+  10496  lib/skint/compile/README.md
   55792  lib/skint\compile/cups-base.scm
   5440  lib/skint\compile/cups-signatures.scm
   58871  lib/skint\compile/cups-passes.scm
-  20760  lib/skint\compile/cups-front.scm
-  223255  lib/skint\compile/cups-dsmarv.scm
+  21540  lib/skint\compile/cups-front.scm
+  223263  lib/skint\compile/cups-dsmarv.scm
   41565  lib/skint/compile/srt\scmi.c
   107283  lib/skint/compile/srt\scmi.mvh
   17812  lib/skint/compile/srt\scmn.mvh
@@ -140,26 +140,26 @@ files
   425  lib/skint/compile/clib\srfi/227/definition.sld
   367  lib/skint/compile/clib\srfi/257/box.sld
   2402  lib/skint/compile/clib\srfi/257/misc.sld
-  47850  marv\m.c
-  139364  marv\r.c
-  144894  marv\v.c
-  61139  marv\a.c
+  47996  marv\m.c
+  146245  marv\r.c
+  148792  marv\v.c
+  62573  marv\a.c
   10563  marv\m.h
-  14199  marv\r.h
-  1488  marv\v.h
-  998  marv\a.h
-  717  target\cc.mvt
-  491  target\cl.mvt
-  726  target\clang.mvt
-  714  target\gcc.mvt
-  565  target\rv64g.mvt
-  616  target\rv64g-cross.mvt
-  453  target\wcpl.mvt
-  191492  wcpl\c.c
-  367700  wcpl\l.c
-  148955  wcpl\p.c
-  159970  wcpl\w.c
-  1889  wcpl\c.h
+  14844  marv\r.h
+  1525  marv\v.h
+  997  marv\a.h
+  740  target\cc.mvt
+  513  target\cl.mvt
+  749  target\clang.mvt
+  737  target\gcc.mvt
+  587  target\rv64g.mvt
+  638  target\rv64g-cross.mvt
+  474  target\wcpl.mvt
+  195506  wcpl\c.c
+  387419  wcpl\l.c
+  151868  wcpl\p.c
+  161467  wcpl\w.c
+  1971  wcpl\c.h
   10578  wcpl\l.h
   11950  wcpl\p.h
   24682  wcpl\w.h

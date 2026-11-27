@@ -39,7 +39,12 @@ Stop after writing the MARV module.  Without \fB\-o\fR it is written beside
 the input as \fIFILE\fB.mvs\fR.
 .TP
 .BR \-o ", " \-\-output =\fIFILE\fR
-Output pathname.  Required unless \fB\-c\fR or \fB\-S\fR is given.
+Output pathname.  Without it the output is named after the input, beside it,
+with the extension the target's product wears: nothing for a native binary on
+a Un*x host, \fI.exe\fR on Windows, \fI.wasm\fR for a \fBwcpl\fR target, and
+nothing for \fBrv64g\fR, whose product is a binary for another machine.  This
+is what SRFI 138 asks of \fBcompile\-r7rs\fR.  An input that would name its
+own output is refused, and asks for \fB\-o\fR.
 .TP
 .BR \-O ", " \-\-optimize =\fILEVEL\fR
 Optimization level 0..3 for the whole pipeline: passed to MARV for the
@@ -47,6 +52,20 @@ backend C compiler, and to the Scheme compiler as \fBcp\-optimize\fR.  A
 \fBcl\fR target saturates the backend at 2, because MSVC has no \fB/O3\fR;
 the Scheme compiler is told the level as given.  Without this option each
 half keeps its own default.
+.TP
+.BR \-D ", " \-\-define =\fIFEATURE\fR
+Add \fIFEATURE\fR to the features the program is compiled against, which is
+what SRFI 138's \fB\-D\fR means; \fBcond\-expand\fR in the program and in
+every library it imports is answered from that list.  The default list is
+\fB(r7rs skint full\-unicode debug)\fR, and \fBdebug\fR is what makes
+\fB(srfi 145)\fR's \fBassume\fR check its expression rather than elide it.
+.B NDEBUG
+is the one name that takes something away instead of adding it: it drops
+\fBdebug\fR, so the assumptions compile away, and it is passed on to MARV as
+\fB\-D NDEBUG\fR so that the runtime's C is compiled with \fBNDEBUG\fR too.
+It is matched exactly, as C spells it, and does not itself become a feature.
+Names are applied in the order written; a feature name is written with
+letters, digits and \fB\-_.+?!:\fR.
 .TP
 .BR \-I ", " \-\-prepend\-libdir =\fIDIR\fR
 Prepend \fIDIR\fR to the Scheme library search path.
@@ -76,7 +95,9 @@ Print the backend commands instead of running them.
 .BR \-M ", " \-\-makefile\-dir =\fIDIR\fR
 Write a self-contained build directory with a makefile in \fIDIR\fR instead of
 running the backend compiler.  \fIDIR\fR must be empty or not yet exist.
-Cannot be combined with \fB\-c\fR or \fB\-S\fR, and requires \fB\-o\fR.
+Cannot be combined with \fB\-c\fR or \fB\-S\fR.  \fB\-o\fR names the
+executable inside \fIDIR\fR; without it the name is derived as it is for a
+plain link.
 .TP
 .BR \-h ", " \-\-help
 Print usage.

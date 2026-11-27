@@ -2,7 +2,7 @@
 ; skomp compile driver: the Scheme side of the pipeline.
 ;---------------------------------------------------------------------------------------------
 ;
-;   skint -q skomp.ssc INPUT.scm OUTPUT.mvs [OPTIMIZE [STACK-PAGES]]
+;   skint -q skomp.ssc INPUT.scm OUTPUT.mvs [OPTIMIZE [STACK-PAGES [FEATURE...]]]
 ;
 ; skomp runs this with its own skint and with SKINT_LIBDIRS pointing at the
 ; directory above, which holds (skint compile) and nothing else of a library
@@ -13,6 +13,12 @@
 ; it and the compiler's own default stands.  That keeps "not given" distinct
 ; from "given the default", so a later change to a default reaches skomp
 ; without skomp having to know what the default was.
+;
+; The remaining arguments are the names skomp was given with -D, in the order
+; they were written.  They are applied to cp-features HERE, by reading the
+; parameter and handing back a new list, for the same reason: skomp does not
+; have to know what the default feature list is to add to it or to take
+; `debug' out of it.
 
 (import (scheme base) (scheme process-context) (skint compile))
 
@@ -23,14 +29,45 @@
           [(= i k) (if (string=? (car l) "-") #f (car l))]
           [else (loop (cdr l) (+ i 1))])))
 
+;; the -D names, which follow the two optional slots
+(define (defines args)
+  (if (> (length args) 4) (list-tail args 4) '()))
+
+;; What -D does to the feature list.  SRFI 138 says -D adds a feature
+;; identifier, and that is what every name does here except one: NDEBUG
+;; takes `debug' away.  Dropping `debug' is what turns (srfi 145)'s assume
+;; from a check into nothing, which is why skomp also hands -D NDEBUG to
+;; marv -- the C the backend compiles then agrees with the Scheme above it.
+;; NDEBUG is matched exactly, as C spells it, and does not itself become a
+;; feature.  The names are applied in the order they were written, so
+;; -D NDEBUG -D debug ends with `debug' in the list.
+(define (without-debug fs)
+  (let loop ([l fs] [acc '()])
+    (cond [(null? l) (reverse acc)]
+          [(eq? (car l) 'debug) (loop (cdr l) acc)]
+          [else (loop (cdr l) (cons (car l) acc))])))
+
+(define (apply-defines names fs)
+  (if (null? names)
+      fs
+      (apply-defines
+       (cdr names)
+       (if (string=? (car names) "NDEBUG")
+           (without-debug fs)
+           (let ([f (string->symbol (car names))])
+             (if (memq f fs) fs (append fs (list f))))))))
+
 (let ([args (cdr (command-line))])
   (when (< (length args) 2)
-    (display "skomp.ssc: expected INPUT OUTPUT [OPTIMIZE [STACK-PAGES]]"
+    (display "skomp.ssc: expected INPUT OUTPUT [OPTIMIZE [STACK-PAGES [FEATURE...]]]"
              (current-error-port))
     (newline (current-error-port))
     (exit 1))
-  (let ([opt (slot args 0)] [pages (slot args 1)])
+  (let ([opt (slot args 0)] [pages (slot args 1)] [defs (defines args)])
     (apply compile-program (car args) (cadr args)
            (append
             (if opt   (list cp-optimize    (string->number opt))   '())
-            (if pages (list cp-stack-pages (string->number pages)) '())))))
+            (if pages (list cp-stack-pages (string->number pages)) '())
+            (if (null? defs)
+                '()
+                (list cp-features (apply-defines defs (cp-features))))))))

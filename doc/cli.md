@@ -24,8 +24,9 @@ second input file is an error.
 | `-T` | `--target-dir=DIR` | `DIR` | Add `DIR` to MARV's `.mvt` lookup path, for target descriptions of your own. |
 | `-c` | `--compile` | *(none)* | Compile to a target object file (`.c`, `.wo` or `.s`) without linking. |
 | `-S` | `--marv-source` | *(none)* | Stop after writing the MARV module (`.mvs`). |
-| `-o` | `--output=FILE` | `FILE` | Output pathname. Required unless `-c` or `-S` is given. |
+| `-o` | `--output=FILE` | `FILE` | Output pathname. Without it, the output is named after the input and the target. |
 | `-O` | `--optimize=LEVEL` | `0`..`3` | Optimization level for the whole pipeline: passed to MARV for the backend C compiler, and to the Scheme compiler as `cp-optimize`. A `cl` target saturates the backend at 2, because MSVC has no `/O3`; the Scheme compiler is told the level as given. Without it, each half keeps its own default. |
+| `-D` | `--define=FEATURE` | `FEATURE` | Add `FEATURE` to the features the program is compiled against, as SRFI 138 says `-D` does. `NDEBUG` is the one name that takes something away; see below. |
 | `-I` | `--prepend-libdir=DIR` | `DIR` | Prepend a Scheme library search directory. |
 | `-A` | `--append-libdir=DIR` | `DIR` | Append a Scheme library search directory. |
 | `-P` | `--stack-pages=N` | `N` | The compiled program's root stack, in pages of 65536 eight-byte words (default 128, which is 64 MiB). Minimum 1. |
@@ -41,6 +42,49 @@ option argument may be separate (`-t cc`) or attached (`-tcc`). A long option
 takes its argument either joined with `=` (`--target=cc`) or as the next
 argument (`--target cc`).
 A `--` argument ends the options, and options come before the input file.
+
+## Features and `-D`
+
+`cond-expand`, in the program and in every library it imports, is answered
+from the compiler's `cp-features` parameter, which describes the world a
+compiled program runs in rather than the interpreter that compiled it. Its
+default is
+
+```scheme
+(r7rs skint full-unicode debug)
+```
+
+and each `-D FEATURE` adds one name to it, which is what SRFI 138's `-D`
+means. The names are added in the order they were written, and a name already
+there is not added twice. Nothing but the Scheme half sees them.
+
+`debug` is in the default, and it is the one name with a visible effect on a
+program that mentions no feature at all: `(srfi 145)`'s `assume` elides its
+check when neither `assumptions` nor `debug` is a feature, so with the default
+an assumption is checked, as `assert` is in a C program compiled without
+`NDEBUG`.
+
+`-D NDEBUG` is therefore the exception, and the one name that takes something
+away rather than adding it:
+
+- it drops `debug` from the feature list, so the assumptions compile away, and
+- it is passed on to MARV as `-D NDEBUG`, which reaches the target compiler
+  where the target description's `~D` placeholder says it goes, so the C of
+  the runtime is compiled with `NDEBUG` too.
+
+It is matched exactly, as C spells it, and does not itself become a feature.
+Since the names are applied in order, `-D NDEBUG -D debug` ends with `debug`
+in the list and `NDEBUG` still on MARV's command line.
+
+```sh
+skomp -o app app.scm                 # assumptions checked
+skomp -D NDEBUG -o app app.scm       # assumptions compiled away
+skomp -D my-build -o app app.scm     # (cond-expand (my-build ...) ...)
+```
+
+A feature name here is written with letters, digits and `-_.+?!:`; skomp
+rejects anything else, because the name travels as one word of a command line
+and a name needing quotes is not one a `cond-expand` would test.
 
 ## Differences from MARV's command line
 
@@ -71,6 +115,22 @@ skomp -o app app.scm
 skomp -t wcpl -o app.wasm app.scm
 ```
 
+Without `-o`, the executable is named after the input, beside it, with the
+extension its product wears: nothing for a native binary on a Un*x host,
+`.exe` on Windows, `.wasm` for a `wcpl` target, and nothing for `rv64g`,
+whose product is a binary for another machine whatever host it was built on.
+This is what SRFI 138 asks of `compile-r7rs`, which compiles `prog.scm` to
+`prog`.
+
+```sh
+skomp app.scm                       # app, or app.exe on Windows
+skomp -t wcpl app.scm               # app.wasm
+```
+
+An input whose name the derivation cannot shorten -- one with no `.scm`
+suffix, where the target adds no extension either -- would name its own
+output, and skomp asks for `-o` instead of overwriting it.
+
 ### Compile only (`-c`)
 
 The program becomes a target object file and nothing is linked. Without `-o`,
@@ -97,7 +157,8 @@ skomp -S app.scm                    # app.mvs
 
 MARV writes `DIR` as a self-contained build directory: the generated target
 files, the runtime adapters it needs, and a `Makefile` (`nmakefile` for the `cl`
-target). `-o` names the executable inside `DIR`. Nothing is compiled.
+target). `-o` names the executable inside `DIR`, and without it the name is
+derived as it is for a plain link. Nothing is compiled.
 
 ```sh
 skomp -M build -o app app.scm

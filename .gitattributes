@@ -1,0 +1,14 @@
+# Line endings.  Everything tracked here is text, and the repository stores
+# it with LF; a Windows checkout gets CRLF, which is what the editors on
+# that side expect.  The exceptions below are the files a Unix tool reads
+# straight out of the working copy, where a CR is not whitespace.
+
+*               text=auto
+
+# bash reads these from the checkout, and a CRLF `set -u' is not the name of
+# an option.  `configure' is a shell script without the suffix.
+*.sh            text eol=lf
+configure       text eol=lf
+
+# roff, which the install rule filters into the man page.
+*.1.in          text eol=lf

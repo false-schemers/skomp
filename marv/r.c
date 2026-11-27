@@ -820,6 +820,43 @@ vt_t vt_of_sym(sym_t s)
   return VT_VOID;
 }
 
+/* The head of a (block|loop [$label] [(result t)] ...) form: the label, 0
+ * when there is none; the type it leaves on the stack, VT_VOID when it
+ * leaves nothing; and the index its body starts at.  Both the
+ * unstructuring pass and the WebAssembly emitter read this shape, so it is
+ * read in one place.
+ *
+ * A loop is required to carry a label.  Nothing could branch back to one
+ * without it, so a loop that has none is a mistake in whatever wrote the
+ * module; complaining here names the form, where a complaint from a later
+ * tool would name a line of generated output instead.  A block may go
+ * without, since it is left by falling out of it. */
+void ctrl_head(snode_t *pn, bool isloop, sym_t *plabel, vt_t *prt, size_t *pfirst)
+{
+  size_t first;
+  sym_t label;
+  vt_t rt;
+  first = 1;
+  label = 0;
+  rt = VT_VOID;
+  if (first < snlen(pn) && snref(pn, first)->nt == SN_SYM) {
+    label = snref(pn, first)->sym;
+    first += 1;
+  } else if (isloop) {
+    sneprintf(pn, "loop needs a label: nothing can branch back to it");
+  }
+  if (first < snlen(pn) && snref(pn, first)->nt == SN_LIST
+      && snlen(snref(pn, first)) == 2
+      && snref(snref(pn, first), 0)->nt == SN_SYM
+      && streql(symname(snref(snref(pn, first), 0)->sym), "result")) {
+    rt = vt_of_sym(snref(snref(pn, first), 1)->sym);
+    if (rt == VT_VOID)
+      sneprintf(pn, "unknown result type in %s", isloop ? "loop" : "block");
+    first += 1;
+  }
+  *plabel = label; *prt = rt; *pfirst = first;
+}
+
 /* ================================================================ */
 /* What a module and its interfaces declare. */
 
@@ -1915,7 +1952,7 @@ static const char *g_prefix_lib    = "libs/";
 
 static buf_t g_seen;
 static buf_t g_sysmvh;            /* resolved paths */
-static buf_t g_sysmod;            /* the names as written */
+static buf_t g_sysrel;            /* the whole relative name, for a later lookup */
 buf_t g_tdirs;             /* -T, where a .mvt is looked up */
 buf_t g_ldirs;             /* -L, system .mvh and its .c adapter */
 buf_t g_idirs;             /* -I, a local .mvh */
@@ -1945,7 +1982,7 @@ void dirs_init(void)
   bufinit(&g_ldirs, sizeof(sym_t));
   bufinit(&g_idirs, sizeof(sym_t));
   bufinit(&g_sysmvh, sizeof(sym_t));
-  bufinit(&g_sysmod, sizeof(sym_t));
+  bufinit(&g_sysrel, sizeof(sym_t));
   bufinit(&g_seen, sizeof(sym_t));
   dirs_add(&g_tdirs, "target/");
   dirs_add(&g_tdirs, g_prefix_target);
@@ -1960,7 +1997,7 @@ void dirs_fini(void)
   buffini(&g_ldirs);
   buffini(&g_idirs);
   buffini(&g_sysmvh);
-  buffini(&g_sysmod);
+  buffini(&g_sysrel);
   buffini(&g_seen);
 }
 
@@ -1983,32 +2020,28 @@ void path_dir(const char *path, cbuf_t *pcb)
   cbput(path, n, pcb);
 }
 
-/* A dotted name is tried as written and with its dots turned into
- * separators, so $sys.stat finds sys.stat.mvh or sys/stat.mvh. [cco] */
+/* A name names one file: the directories it may sit in are the ones an
+ * include wrote in front of it, and the dots in it are its own.  A dotted
+ * name used to be tried a second time with its dots as separators, so that
+ * $sys.stat could be answered by sys/stat.mvh; nothing was ever laid out
+ * that way, and an include that wants a directory says so now.  [cco] */
 bool find_in_dirs(buf_t *pb, const char *first, const char *name,
                          const char *ext, cbuf_t *pcb)
 {
-  size_t d, k, n;
-  bool dotted;
+  size_t d, n;
   if (name[0] == '$') name += 1;
-  dotted = false;
-  for (k = 0; name[k] != '\0'; ++k) if (name[k] == '.') dotted = true;
   n = (first != NULL) ? buflen(pb) + 1 : buflen(pb);
   for (d = 0; d < n; ++d) {
     const char *dir;
-    size_t pass;
     if (first != NULL) dir = (d == 0) ? first : symname(*(sym_t *)bufref(pb, d - 1));
     else dir = symname(*(sym_t *)bufref(pb, d));
     if (dir == NULL) continue;
-    for (pass = 0; pass < (dotted ? 2u : 1u); ++pass) {
-      cbclear(pcb);
-      cbputs(dir, pcb);
-      for (k = 0; name[k] != '\0'; ++k)
-        cbputc((pass == 1 && name[k] == '.') ? '/' : name[k], pcb);
-      cbputs(ext, pcb);
-      cbputc(0, pcb);
-      if (file_readable((const char *)cbdata(pcb))) return true;
-    }
+    cbclear(pcb);
+    cbputs(dir, pcb);
+    cbputs(name, pcb);
+    cbputs(ext, pcb);
+    cbputc(0, pcb);
+    if (file_readable((const char *)cbdata(pcb))) return true;
   }
   return false;
 }
@@ -2021,44 +2054,55 @@ bool find_in_dirs(buf_t *pb, const char *first, const char *name,
 void sys_reset(void)
 {
   bufclear(&g_sysmvh);
-  bufclear(&g_sysmod);
+  bufclear(&g_sysrel);
   bufclear(&g_seen);
 }
 
-size_t sys_count(void) { return buflen(&g_sysmod); }
+size_t sys_count(void) { return buflen(&g_sysrel); }
 
-const char *sys_name(size_t i)
+/* The whole relative name an include wrote, directories included.  An object
+ * written with -c carries this rather than the module name, because the link
+ * that reads it back resolves it again on its own -L path, where the module
+ * name alone would find whichever implementation came first. */
+const char *sys_rel(size_t i)
 {
-  if (i >= buflen(&g_sysmod)) return "";
-  return symname(*(sym_t *)bufref(&g_sysmod, i));
+  if (i >= buflen(&g_sysrel)) return "";
+  return symname(*(sym_t *)bufref(&g_sysrel, i));
 }
 
-static void sys_note(sym_t path, sym_t name)
+/* The module that include named: the last segment of it, dots and all.  The
+ * directories in front are not part of the module, which is what lets two of
+ * them hold two implementations of one.  Taken from the relative name rather
+ * than stored beside it, so the two cannot disagree: foo/bar/baz names baz,
+ * and foo/bar.baz names bar.baz. */
+const char *sys_name(size_t i)
+{
+  const char *s;
+  const char *p;
+  s = sys_rel(i);
+  p = strrchr(s, '/');
+  return (p != NULL) ? p + 1 : s;
+}
+
+static void sys_note(sym_t path, sym_t rel)
 {
   size_t i;
   for (i = 0; i < buflen(&g_sysmvh); ++i)
     if (*(sym_t *)bufref(&g_sysmvh, i) == path) return;
   *(sym_t *)bufnewbk(&g_sysmvh) = path;
-  *(sym_t *)bufnewbk(&g_sysmod) = name;
+  *(sym_t *)bufnewbk(&g_sysrel) = rel;
 }
 
-/* A system .mvh is paired with the .c adapter beside it, by its own name
- * first and then by the slashed spelling of a dotted one. */
+/* A system .mvh is paired with the .c adapter beside it, under the same
+ * name.  This too used to try a dotted name again with its dots as
+ * separators; see find_in_dirs. */
 bool adapter_of(const char *mvh, cbuf_t *pcb)
 {
-  size_t n, k, base;
+  size_t n;
   n = strlen(mvh);
   if (n < 4) return false;
   cbclear(pcb);
   cbput(mvh, n - 4, pcb);
-  cbputs(".c", pcb);
-  cbputc(0, pcb);
-  if (file_readable((const char *)cbdata(pcb))) return true;
-  base = n - 4;
-  while (base > 0 && mvh[base - 1] != '/' && mvh[base - 1] != '\\') base -= 1;
-  cbclear(pcb);
-  cbput(mvh, base, pcb);
-  for (k = base; k < n - 4; ++k) cbputc((mvh[k] == '.') ? '/' : mvh[k], pcb);
   cbputs(".c", pcb);
   cbputc(0, pcb);
   return file_readable((const char *)cbdata(pcb));
@@ -2073,22 +2117,42 @@ static bool seen_before(sym_t path)
   return false;
 }
 
-/* an (include [system] $name) form: -L for a system header, the including
+/* An (include [system] $name) form: -L for a system header, the including
  * file's own directory and then -I for a local one.  A header is read once;
  * a system one is recorded after its own includes, so a module's dependency
- * list names what it needs before what needs it.  [cco] */
+ * list names what it needs before what needs it.
+ *
+ * A form may name several symbols, and then all but the last are directories
+ * the last one sits in: (include system $foo $bar $baz) reads foo/bar/baz.mvh.
+ * One form names one interface either way, so several interfaces still take
+ * several forms.  The prefix chooses which file is read and nothing else: the
+ * module a program goes on to name comes from the interface's own
+ * (interface $name ...), so two directories can hold two implementations of
+ * one module and the code that uses it does not change.
+ *
+ * A dotted segment is a path separator as well, so (include system $foo
+ * $bar.baz) looks for foo/bar.baz.mvh and then foo/bar/baz.mvh, while
+ * (include system $foo $bar $baz) looks only for foo/bar/baz.mvh.  The two
+ * can land on the same file and still name different modules: bar.baz for
+ * the first and baz for the second.
+ *
+ * A system include records the whole relative name.  sys_name takes the
+ * module out of it, and sys_rel hands all of it to a -c object's
+ * marv-sys-deps line, since the link that reads that back resolves it again
+ * on its own -L path and the module name alone would find whichever
+ * implementation came first.  [cco] */
 void mod_include(mod_t *pm, const char *src, snode_t *pn)
 {
   size_t i;
   bool sys;
+  bool any;
+  const char *rel;
+  cbuf_t name;
   cbuf_t path;
   cbuf_t here;
   sys = false;
-  for (i = 1; i < snlen(pn); ++i) {
-    snode_t *pc;
-    pc = snref(pn, i);
-    if (pc->nt == SN_SYM && streql(symname(pc->sym), "system")) sys = true;
-  }
+  any = false;
+  cbinit(&name);
   cbinit(&path);
   cbinit(&here);
   path_dir(src, &here);
@@ -2096,27 +2160,38 @@ void mod_include(mod_t *pm, const char *src, snode_t *pn)
   for (i = 1; i < snlen(pn); ++i) {
     const char *nm;
     snode_t *pc;
-    sym_t rp;
     pc = snref(pn, i);
     if (pc->nt != SN_SYM) continue;
     nm = symname(pc->sym);
-    if (streql(nm, "system")) continue;
+    if (streql(nm, "system")) { sys = true; continue; }
     if (nm[0] == '$') nm += 1;
-    if (sys) {
-      if (!find_in_dirs(&g_ldirs, NULL, nm, ".mvh", &path))
-        sneprintf(pn, "cannot find system interface %s on the -L path", nm);
-    } else {
-      if (!find_in_dirs(&g_idirs, (const char *)cbdata(&here), nm, ".mvh", &path))
-        sneprintf(pn, "cannot find interface %s beside %s or on the -I path", nm, src);
-    }
+    if (nm[0] == '\0') sneprintf(pn, "empty name in include");
+    if (any) cbputc('/', &name);
+    cbputs(nm, &name);
+    any = true;
+  }
+  cbputc(0, &name);
+  if (!any) sneprintf(pn, "include names no interface");
+  rel = (const char *)cbdata(&name);
+  if (sys) {
+    if (!find_in_dirs(&g_ldirs, NULL, rel, ".mvh", &path))
+      sneprintf(pn, "cannot find system interface %s on the -L path", rel);
+  } else {
+    if (!find_in_dirs(&g_idirs, (const char *)cbdata(&here), rel, ".mvh", &path))
+      sneprintf(pn, "cannot find interface %s beside %s or on the -I path", rel, src);
+  }
+  {
+    sym_t rp;
     rp = intern((const char *)cbdata(&path));
-    if (seen_before(rp)) continue;
-    if (!mod_iface(pm, symname(rp)))
-      sneprintf(pn, "cannot read interface %s", symname(rp));
-    if (sys) sys_note(rp, intern(nm));
+    if (!seen_before(rp)) {
+      if (!mod_iface(pm, symname(rp)))
+        sneprintf(pn, "cannot read interface %s", symname(rp));
+      if (sys) sys_note(rp, intern(rel));
+    }
   }
   cbfini(&here);
   cbfini(&path);
+  cbfini(&name);
 }
 
 const char *sys_path(size_t i)
@@ -2565,20 +2640,13 @@ static void u_block(unst_t *pu, snode_t *pn)
   opnd_t res;
   bool isloop;
   sym_t startl;
+  sym_t label;
   const char *h;
 
   h = symname(snref(pn, 0)->sym);
   isloop = streql(h, "loop");
-  first = 1;
-  rt = VT_VOID;
   memset(&res, 0, sizeof(opnd_t));
-  if (first < snlen(pn) && snref(pn, first)->nt == SN_SYM) first += 1;   /* $label */
-  if (first < snlen(pn) && snref(pn, first)->nt == SN_LIST
-      && snlen(snref(pn, first)) == 2
-      && streql(symname(snref(snref(pn, first), 0)->sym), "result")) {
-    rt = vt_of_sym(snref(snref(pn, first), 1)->sym);
-    first += 1;
-  }
+  ctrl_head(pn, isloop, &label, &rt, &first);
   if (isloop) u_materialize(pu);
   if (rt != VT_VOID) u_temp(pu, rt, &res);
 
@@ -2586,7 +2654,7 @@ static void u_block(unst_t *pu, snode_t *pn)
   endl = isloop ? u_label(pu, "loop_end") : startl;
   pc = (ctrl_t *)bufnewbk(&pu->ctrl);
   memset(pc, 0, sizeof(ctrl_t));
-  pc->label = (snlen(pn) > 1 && snref(pn, 1)->nt == SN_SYM) ? snref(pn, 1)->sym : 0;
+  pc->label = label;
   pc->isloop = isloop;
   pc->target = isloop ? startl : endl;
   pc->hasres = (rt != VT_VOID);

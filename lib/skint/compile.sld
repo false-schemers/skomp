@@ -30,6 +30,19 @@
 ;;;                 exits 1: every call that pushes a frame checks it
 ;;;                 against a limit one red zone short of the end.
 ;;;
+;;;   cp-features   the feature identifiers compiled code is expanded
+;;;                 against, a list of symbols, default (r7rs skint
+;;;                 full-unicode debug).  cond-expand in the program
+;;;                 and in every library it imports is answered from
+;;;                 this list, which describes the world a standalone
+;;;                 MARV executable provides rather than the host
+;;;                 interpreter's.  `debug` is in the default, and it
+;;;                 is what makes (srfi 145)'s assume check its
+;;;                 expression; a caller that wants the assumptions
+;;;                 compiled away leaves it out.  Library tests,
+;;;                 (library (srfi 1)) and friends, are answered
+;;;                 separately, from clib/.
+;;;
 ;;; INPUT and OUTPUT filenames are used exactly as given, so they mean
 ;;; what they would to any other tool: the working directory decides.
 ;;; The compiler's own files -- srt/ and clib/ under compile/ -- are
@@ -113,7 +126,7 @@
             gensym features x-error c-error
             andmap ormap list1? list2+?
             ))
-  (export compile-program cp-optimize cp-stack-pages)
+  (export compile-program cp-optimize cp-stack-pages cp-features)
   (include "compile/cups-base.scm")
   (include "compile/cups-signatures.scm")
   (include "compile/cups-passes.scm")

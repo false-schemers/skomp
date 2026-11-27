@@ -64,6 +64,8 @@ $ skomp -t rv64g -o app app.scm        # RISC-V 64-bit
 $ skomp -c app.scm                     # a target object file, no link
 $ skomp -S app.scm                     # stop at the MARV module, app.mvs
 $ skomp -M build -o app app.scm        # a self-contained build directory
+$ skomp app.scm                        # -o is optional: app, or app.exe
+$ skomp -D NDEBUG -o app app.scm       # compile the (srfi 145) assumptions away
 ```
 
 `-I DIR` and `-A DIR` add directories where your own `.sld` libraries live,

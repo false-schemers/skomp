@@ -29,6 +29,7 @@ sym_t   g_hb_id;    /* id for heap base global */
 size_t  g_sdbaddr;  /* static data allocation start */
 size_t  g_stacksz;  /* stack size in bytes */
 size_t  g_argvbsz;  /* argv buf size in bytes */
+bool    g_ndebug;   /* -DNDEBUG: use library's include/NDEBUG/ headers */
 
 /* initialize wcpl environment */
 void init_wcpl(dsbuf_t *pincv, dsbuf_t *plibv, long optlvl, size_t sarg, size_t aarg)
@@ -38,6 +39,10 @@ void init_wcpl(dsbuf_t *pincv, dsbuf_t *plibv, long optlvl, size_t sarg, size_t 
   g_ibases = newbuf(sizeof(sym_t));
   for (i = 0; i < dsblen(pincv); ++i) {
     dstr_t *pds = dsbref(pincv, i);
+    if (g_ndebug) { /* NDEBUG variants (assert.h) shadow regular ones */
+      int sepchar = strsuf(*pds, "\\") ? '\\' : '/';
+      *(sym_t*)bufnewbk(g_ibases) = internf("%sNDEBUG%c", *pds, sepchar);
+    }
     *(sym_t*)bufnewbk(g_ibases) = intern(*pds);
   }
   g_lbases = newbuf(sizeof(sym_t));
@@ -47,6 +52,8 @@ void init_wcpl(dsbuf_t *pincv, dsbuf_t *plibv, long optlvl, size_t sarg, size_t 
     dstr_t *pds = dsbref(plibv, i);
     int sepchar = strsuf(*pds, "\\") ? '\\' : '/';
     *(sym_t*)bufnewbk(g_lbases) = intern(*pds);
+    if (g_ndebug) /* NDEBUG variants (assert.h) shadow regular ones */
+      *(sym_t*)bufnewbk(g_ibases) = internf("%sinclude%cNDEBUG%c", *pds, sepchar, sepchar);
     *(sym_t*)bufnewbk(g_ibases) = internf("%sinclude%c", *pds, sepchar);
   }
   fsbinit(&g_funcsigs);
@@ -203,6 +210,9 @@ static ts_t ts_arith_common(ts_t ts1, ts_t ts2)
   if (ts1 == TS_ULLONG || ts2 == TS_ULLONG) return TS_ULLONG;
   if (ts1 == TS_LLONG  || ts2 == TS_LLONG)  return TS_LLONG;
   if (ts1 == TS_ULONG  || ts2 == TS_ULONG)  return TS_ULONG;
+  /* wasm32: long can't represent all unsigned int values, so C's usual
+   * arithmetic conversions make long op unsigned int unsigned long */
+  if ((ts1 == TS_LONG && ts2 == TS_UINT) || (ts1 == TS_UINT && ts2 == TS_LONG)) return TS_ULONG;
   if (ts1 == TS_LONG   || ts2 == TS_LONG)   return TS_LONG;
   if (ts1 == TS_UINT   || ts2 == TS_UINT)   return TS_UINT;
   return TS_INT;
@@ -213,6 +223,8 @@ static bool ts_arith_assign_compatible(ts_t ts1, ts_t ts2)
 {
   assert(ts_numerical_or_enum(ts1) && ts_numerical_or_enum(ts2));
   if (ts1 == ts2) return true;
+  /* implicit unsigned int => long stays allowed (same width on wasm32) */
+  if (ts1 == TS_LONG && ts2 == TS_UINT) return true;
   return ts_arith_common(ts1, ts2) == ts1;
 }
 
@@ -953,10 +965,12 @@ bool static_eval(node_t *pn, buf_t *prib, seval_t *pr)
       if (ts_numerical(tc) && static_eval(ndref(pn, 1), prib, &rx) && ts_numerical(rx.ts)) {
         numval_t vc = rx.val; numval_convert(tc, rx.ts, &vc);
         pr->ts = tc; pr->val = vc; ok = true;
-      } else if (tc == TS_PTR && ndlen(ndref(pn, 0)) == 1 && ndref(ndref(pn, 0), 0)->ts == TS_VOID) {
-        int ri; /* see if this is NULL pointer, i.e. (void*)0 */ 
+      } else if (tc == TS_PTR) {
+        int ri; /* see if this is NULL pointer, i.e. (void*)0 or (T*)0 */ 
         if (arithmetic_eval_to_int(ndref(pn, 1), prib, &ri) && ri == 0) {
           pr->ts = TS_PTR; pr->val.i = 0; pr->id = 0; ok = true;
+        } else if (static_eval(ndref(pn, 1), prib, &rx) && rx.ts == TS_PTR) {
+          *pr = rx; ok = true; /* (T*)&x etc: still an address constant */
         }
       } 
       return ok;
@@ -1236,7 +1250,9 @@ static watie_t *initialize_bulk_data(size_t pdidx, watie_t *pd, size_t off, node
       if (!pin) neprintf(pdn, "unknown name in address initializer");
       assert(pin->nt == NT_IMPORT && ndlen(pin) == 1 && ndcref(pin, 0)->nt == NT_TYPE);
       pitn = ndcref(pin, 0);
-      if (ts_bulk(pitn->ts) || pitn->ts == TS_PTR) {
+      /* scalar globals (incl. pointers) are wasm globals, so they have no 
+       * address; string literals are posted as char* but live in data */
+      if (ts_bulk(pitn->ts) || (pitn->ts == TS_PTR && strsuf(symname(r.id), "$") != NULL)) {
         inscode_t *pic = icbnewbk(&pd->code);
         pic->in = IN_REF_DATA; pic->id = r.id; pic->arg2.mod = pin->name;
         pic->arg.i = r.val.i; /* 0 or numerical offset in 'elements' */
@@ -1326,9 +1342,13 @@ static void process_vardecl(sym_t mmod, node_t *pdn, node_t *pin)
             } else neprintf(pdn, "constant initializer cannot be implicitly converted to expected type");
             asm_numerical_const(r.ts == TS_PTR ? TS_UINT : r.ts, &r.val, &pg->ic); /* wasm32 */
           } else {
-            const node_t *pimn = lookup_global(r.id); inscode_t *pic = &pg->ic;
+            const node_t *pimn = lookup_global(r.id); inscode_t *pic = &pg->ic; ts_t its;
             if (!pimn) neprintf(pdn, "unknown identifier in address initializer");
             assert(pimn->nt == NT_IMPORT && pimn->name != 0 && ndlen(pimn) == 1);
+            /* as above: functions, data, string literals; not scalar globals */
+            its = ndcref(pimn, 0)->ts;
+            if (its != TS_FUNCTION && !ts_bulk(its) && !(its == TS_PTR && strsuf(symname(r.id), "$") != NULL))
+              neprintf(pin, "address initializer should be a reference to a nonscalar type");
             pic->in = ndcref(pimn, 0)->ts == TS_FUNCTION ? IN_REF_FUNC : IN_REF_DATA; 
             pic->id = r.id; pic->arg2.mod = pimn->name;
           }
@@ -2783,6 +2803,25 @@ static bool acode_func_ref(node_t *pan)
   return false;
 }
 
+/* check if code is known to produce 0 or 1 (comparison or 0/1 constant) */
+static bool acode_bool01(node_t *pan)
+{
+  while (pan->nt == NT_ACODE && icblen(&pan->data) > 0) {
+    size_t n = icblen(&pan->data); inscode_t *pic = icbref(&pan->data, n-1);
+    if (pic->in == IN_PLACEHOLDER) {
+      /* last placeholder stands for the last spliced-in child */
+      if (ndlen(pan) < 2) return false;
+      pan = ndref(pan, ndlen(pan)-1);
+      continue;
+    }
+    if (pic->in >= IN_I32_EQZ && pic->in <= IN_F64_GE) return true;
+    if (pic->in == IN_I32_CONST && n == 1 && ndlen(pan) == 1)
+      return pic->arg.i == 0 || pic->arg.i == 1;
+    return false;
+  }
+  return false;
+}
+
 /* check if this node is a var get; returns 0 or instruction code */
 static int acode_rval_get(node_t *pan)
 {
@@ -2928,10 +2967,10 @@ static node_t *compile_binary(node_t *prn, node_t *pan1, tt_t op, node_t *pan2)
 {
   node_t *patn1 = acode_type(pan1), *patn2 = acode_type(pan2); 
   ts_t ts1 = patn1->ts, ts2 = patn2->ts;
-  if (((ts1 == TS_ENUM && ts2 == TS_ENUM && 
+  /* enums behave like ints, but values of two different named enums don't mix */
+  if ((ts1 == TS_ENUM && ts2 == TS_ENUM &&
         (patn1->name == 0 || patn2->name == 0 || patn1->name == patn2->name)) ||
-       (ts1 == TS_ENUM && ts_numerical(ts2)) || (ts_numerical(ts1) && ts2 == TS_ENUM))
-      && op >= TT_LT && op <= TT_NE) {
+      (ts1 == TS_ENUM && ts2 != TS_ENUM) || (ts1 != TS_ENUM && ts2 == TS_ENUM)) {
     if (ts1 == TS_ENUM) ts1 = TS_INT;
     if (ts2 == TS_ENUM) ts2 = TS_INT;
   }
@@ -2987,11 +3026,27 @@ static node_t *compile_binary(node_t *prn, node_t *pan1, tt_t op, node_t *pan2)
   return NULL; /* won't happen */
 }
 
+/* check if code is (x ? y : z) != 0 with i32 x ? y : z, e.g. 0/1 result of && or || */
+static bool acode_cond_ne0(node_t *pan)
+{
+  numval_t *pnv; node_t *pxn; instr_t in;
+  if (pan->nt != NT_ACODE || ndlen(pan) != 3 || icblen(&pan->data) != 3) return false;
+  if (icbref(&pan->data, 0)->in != IN_PLACEHOLDER || icbref(&pan->data, 1)->in != IN_PLACEHOLDER) return false;
+  if (icbref(&pan->data, 2)->in != IN_I32_NE) return false;
+  if (acode_const(ndref(pan, 2), &pnv) != TS_INT || pnv->i != 0) return false;
+  pxn = ndref(pan, 1);
+  if (pxn->nt != NT_ACODE || icblen(&pxn->data) == 0) return false;
+  in = icbref(&pxn->data, icblen(&pxn->data)-1)->in;
+  return in == IN_SELECT || in == IN_END;
+}
+
 /* compile regular unary operator expressions (! ~ + -) */
 static node_t *compile_unary(node_t *prn, tt_t op, node_t *pan)
 {
   node_t *pcn = npnewcode(prn), *patn = acode_type(pan); 
   ts_t ts = patn->ts; numval_t v;
+  if (ts == TS_ENUM) ts = TS_INT; /* enums behave like ints */
+  if (op == TT_NOT && acode_cond_ne0(pan)) lift_arg1(pan); /* !((x ? y : z) != 0) => !(x ? y : z) */
   if (ts_numerical(ts)) {
     ts_t rts = ts_integral_promote(ts); 
     ndsettype(ndnewbk(pcn), (op == TT_NOT) ? TS_INT : rts);
@@ -3037,6 +3092,8 @@ node_t *compile_booltest(node_t *prn, node_t *pan)
     if (patn->ts == TS_PTR) pan = compile_cast(prn, acode_type(pzn), pan);
     return compile_binary(prn, pan, TT_NE, pzn);
   } 
+  /* (x ? y : z) != 0 => x ? y : z: any nonzero i32 is true here */
+  if (acode_cond_ne0(pan)) lift_arg1(pan);
   /* else good as-is */
   return pan;
 }
@@ -3802,11 +3859,20 @@ static node_t *expr_compile(node_t *pn, buf_t *prib, const node_t *ret)
       node_t *pan1 = expr_compile(ndcref(pn, 0), prib, NULL);
       node_t *pan2 = expr_compile(ndcref(pn, 1), prib, NULL);
       switch (pn->op) {
-        case TT_AND_AND: {
-          pcn = compile_cond(pn, pan1, pan2, compile_numlit(pn, TS_INT, (v.i = 0, &v)));
-        } break;
-        case TT_OR_OR: {
-          pcn = compile_cond(pn, pan1, compile_numlit(pn, TS_INT, (v.i = 1, &v)), pan2);
+        case TT_AND_AND: case TT_OR_OR: {
+          /* x && y => (x ? y : 0) != 0;  x || y => (x ? 1 : y) != 0;
+           * C requires 0/1; != 0 is omitted when y is known to be 0/1 */
+          bool b01 = acode_type(pan2)->ts == TS_BOOL; /* bool is 0/1 already */
+          if (!b01) {
+            pan2 = compile_booltest(pn, pan2); /* non-i32 y => y != 0 */
+            b01 = acode_bool01(pan2);
+          }
+          if (pn->op == TT_AND_AND)
+            pcn = compile_cond(pn, pan1, pan2, compile_numlit(pn, TS_INT, (v.i = 0, &v)));
+          else
+            pcn = compile_cond(pn, pan1, compile_numlit(pn, TS_INT, (v.i = 1, &v)), pan2);
+          /* != 0 outside, not on y: one compare, and a simple y keeps SELECT */
+          if (!b01) pcn = compile_binary(pn, pcn, TT_NE, compile_numlit(pn, acode_type(pcn)->ts, (v.i = 0, &v)));
         } break;
         default: { /* normal binary */
           pcn = compile_binary(pn, pan1, pn->op, pan2);
@@ -4603,10 +4669,11 @@ int main(int argc, char **argv)
      "  -o ofile  Output file (use .wasm suffix for binary executable)\n"
      "  -I path   Add include path (must end with path separator)\n"
      "  -L path   Add library path (must end with path separator)\n"
+     "  -DNDEBUG  Disable assert() (no other -D macros are supported)\n"
      "  -s stksz  Stack size in bytes; defaults to 131072 (128K)\n"
      "  -a argsz  Argument area size in bytes (use 0 for malloc); defaults to 4096\n"
      "  -h        This help");
-  while ((opt = egetopt(argc, argv, "wvqcO:o:L:I:s:a:h")) != EOF) {
+  while ((opt = egetopt(argc, argv, "wvqcO:o:L:I:D:s:a:h")) != EOF) {
     switch (opt) {
       case 'w':  setwlevel(3); break;
       case 'v':  incverbosity(); break;
@@ -4616,9 +4683,12 @@ int main(int argc, char **argv)
       case 'o':  ofile_arg = eoptarg; break;
       case 'I':  eoarg = eoptarg; dsbpushbk(&incv, &eoarg); break;
       case 'L':  eoarg = eoptarg; dsbpushbk(&libv, &eoarg); break;
+      case 'D':  if (streql(eoptarg, "NDEBUG")) g_ndebug = true;
+                 else eusage("-D%s: only -DNDEBUG is supported", eoptarg);
+                 break;
       case 's':  s_arg = strtoul(eoptarg, NULL, 0); break; 
       case 'a':  a_arg = strtoul(eoptarg, NULL, 0); break; 
-      case 'h':  eusage("WCPL 1.04 built on " __DATE__);
+      case 'h':  eusage("WCPL 1.05 built on " __DATE__);
     }
   }
 

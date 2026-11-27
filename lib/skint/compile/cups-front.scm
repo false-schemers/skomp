@@ -253,7 +253,7 @@
 ;;; --- cond-expand world for compiled code ------------------------------
 ;;; cond-expand, both in library declarations and in program code, must
 ;;; describe the world the compiled program will run in, not the host
-;;; interpreter's.  Feature tests therefore see only *ds-features*:
+;;; interpreter's.  Feature tests therefore see only (cp-features):
 ;;; (r7rs) plus what a standalone MARV executable provides.  Library
 ;;; tests, (library (srfi 1)) and friends, are answered by Skint's
 ;;; library-available? through the shadow environment's 'peek, so they
@@ -283,7 +283,22 @@
 ;;
 ;; The tower features stay unclaimed: no full numeric tower, no
 ;; C99/XSI math.
-(define *ds-features* '(r7rs skint full-unicode))
+;;
+;; `debug` is claimed, and that is what makes (srfi 145)'s assume
+;; check its expression instead of expanding to it: the library elides
+;; the check when neither `assumptions` nor `debug` is a feature.  The
+;; default therefore puts a compiled program where a C program is,
+;; with the checks in and a switch to take them out, rather than
+;; quietly compiling away every assumption the program states.  The
+;; caller takes it out through cp-features; skomp's -D NDEBUG does
+;; that, and hands -D NDEBUG to marv in the same breath so the C the
+;; backend compiles agrees with the Scheme above it.
+(define cp-features
+  (make-parameter '(r7rs skint full-unicode debug)
+    (lambda (v)
+      (unless (and (list? v) (andmap symbol? v))
+        (error "cp-features: not a list of feature identifiers" v))
+      v)))
 
 ;; library-available? decides (library ...) cond-expand tests.  Skint's
 ;; version answers from the host's world (root registry, then
@@ -369,6 +384,6 @@
             [(val-builtin? hval) (emit-core! (xpand #f x env))]
             [else (emit-core! (xpand-call hval (cdr x) env))]))
         (emit-core! (xpand #f x env))))
-  (parameterize ([features *ds-features*])
+  (parameterize ([features (cp-features)])
     (for-each (lambda (src) (for-each-program-form src expand-top)) ifiles))
   (cons 'begin (reverse cores)))

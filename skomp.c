@@ -505,6 +505,64 @@ static int mvt_obj_ext(const char *mvtpath, char *dst, size_t cap)
   return found;
 }
 
+/* The target type: the symbol after `type' in the .mvt.  Read the same way
+ * obj-ext is, a line at a time and without a reader, because the two things
+ * skomp needs from a target description are a word each and the file is
+ * MARV's to parse. */
+static int mvt_type(const char *mvtpath, char *dst, size_t cap)
+{
+  FILE *fp;
+  char line[512];
+  int found;
+  fp = fopen(mvtpath, "rb");
+  if (fp == NULL) return 0;
+  found = 0;
+  while (!found && fgets(line, (int)sizeof(line), fp) != NULL) {
+    char *p;
+    size_t n;
+    p = strstr(line, "(type");
+    if (p == NULL) continue;
+    p += 5;
+    while (*p == ' ' || *p == '\t') p++;
+    n = 0;
+    while (p[n] != 0 && p[n] != ')' && p[n] != ' ' && p[n] != '\t' &&
+           p[n] != '\r' && p[n] != '\n') n++;
+    if (n == 0 || n + 1 > cap) break;
+    memcpy(dst, p, n);
+    dst[n] = 0;
+    found = 1;
+  }
+  fclose(fp);
+  return found;
+}
+
+/* A product named after the input: its base name without a .scm suffix, EXT
+ * appended, in the input's own directory.  This is how skomp names every
+ * output it was not given a name for -- the .mvs of -S, the object of -c,
+ * and the executable of neither. */
+static int name_beside(char *dst, size_t cap, const char *input, const char *ext)
+{
+  char dir[MAXPATH], base[MAXPATH];
+  const char *b;
+  size_t n;
+  path_dir(dir, sizeof(dir), input);
+  b = path_base(input);
+  n = strlen(b);
+  if (n > 4 && strcmp(&b[n - 4], ".scm") == 0) n -= 4;
+  if (n + strlen(ext) + 1 > sizeof(base)) {
+    fprintf(stderr, "skomp: input name is too long\n");
+    return 0;
+  }
+  memcpy(base, b, n);
+  base[n] = 0;
+  strcat(base, ext);
+  if (!path_join(dst, cap, dir, base)) {
+    fprintf(stderr, "skomp: output path is too long\n");
+    return 0;
+  }
+  return 1;
+}
+
 /* ---------------------------------------------------------------- */
 /* the option parser                                                */
 /*                                                                  */
@@ -727,11 +785,55 @@ static long page_count(const char *what, const char *val)
   return n;
 }
 
-/* one more directory in a fixed-size list */
-static void add_dir(const char *what, const char **v, int *n, const char *dir)
+/* one more entry in a fixed-size list: a directory, or a -D name */
+static void add_arg(const char *what, const char **v, int *n, const char *arg)
 {
   if (*n >= MAXDIRS) eusage("too many %s options", what);
-  v[(*n)++] = dir;
+  v[(*n)++] = arg;
+}
+
+/* A -D name travels as one word of two command lines that are built as text:
+ * the driver script's, and marv's for NDEBUG.  A name that would need
+ * quoting there is not a feature identifier anybody would write, so the
+ * shapes accepted here are the ones a cond-expand could test. */
+static const char *check_define(const char *name)
+{
+  const char *p;
+  if (name[0] == 0) eusage("-D takes a feature name, not an empty one");
+  if (name[0] == '-') eusage("-D takes a feature name, not an option: %s", name);
+  for (p = name; *p != 0; p++) {
+    if (*p >= 'a' && *p <= 'z') continue;
+    if (*p >= 'A' && *p <= 'Z') continue;
+    if (*p >= '0' && *p <= '9') continue;
+    if (*p == '-' || *p == '_' || *p == '.' || *p == '+' ||
+        *p == '?' || *p == '!' || *p == ':') continue;
+    eusage("-D %s: a feature name takes letters, digits and -_.+?!:", name);
+  }
+  return name;
+}
+
+/* The executable's name for a caller who gave none.  SRFI 138 asks for
+ * prog.scm to compile to prog, and the target says what that is called: a
+ * native binary takes the host's own convention, a wcpl target links a
+ * .wasm, and an rv64g target produces a binary for another machine, which
+ * wears no extension even when skomp runs on Windows. */
+static int derive_exe(char *dst, size_t cap, const char *input, const char *mvt)
+{
+  char type[32];
+  const char *ext;
+  if (!mvt_type(mvt, type, sizeof(type))) {
+    fprintf(stderr, "skomp: cannot tell the target type of %s; give -o\n", mvt);
+    return 0;
+  }
+  if (strcmp(type, "wcpl") == 0) ext = ".wasm";
+  else if (strcmp(type, "rv64g") == 0) ext = "";
+  else ext = host_windows() ? ".exe" : "";
+  if (!name_beside(dst, cap, input, ext)) return 0;
+  if (strcmp(dst, input) == 0) {
+    fprintf(stderr, "skomp: %s would be its own output; give -o\n", input);
+    return 0;
+  }
+  return 1;
 }
 
 int main(int argc, char **argv)
@@ -744,13 +846,14 @@ int main(int argc, char **argv)
   const char *prelibs[MAXDIRS];
   const char *postlibs[MAXDIRS];
   const char *targdirs[MAXDIRS];
-  int nprelibs = 0, npostlibs = 0, ntargdirs = 0;
-  int conly = 0, marvonly = 0, dryrun = 0;
+  const char *defines[MAXDIRS];
+  int nprelibs = 0, npostlibs = 0, ntargdirs = 0, ndefines = 0;
+  int conly = 0, marvonly = 0, dryrun = 0, ndebug = 0;
   int optlevel = -1;
   long stackpages = -1;   /* -1 = not given; the compiler's own default stands */
   int i, opt, rc;
   char mvt[MAXPATH], srt[MAXPATH], skint[MAXPATH], marv[MAXPATH];
-  char lib[MAXPATH], ssc[MAXPATH], mvs[MAXPATH];
+  char lib[MAXPATH], ssc[MAXPATH], mvs[MAXPATH], exe[MAXPATH];
   static char libdirs[MAXCMD];
   static char pathvar[MAXCMD];
   static char wcplinc[MAXPATH + 64];
@@ -770,8 +873,9 @@ int main(int argc, char **argv)
      "  -T, --target-dir=DIR         Add DIR to the .mvt lookup path\n"
      "  -c, --compile                Compile to a target object file, do not link\n"
      "  -S, --marv-source            Stop after writing the MARV module (.mvs)\n"
-     "  -o, --output=FILE            Output file; required unless -c or -S is given\n"
+     "  -o, --output=FILE            Output file; named after FILE and the target if absent\n"
      "  -O, --optimize=LEVEL         Optimization level for the whole pipeline (0, 1, 2, or 3)\n"
+     "  -D, --define=FEATURE         Add a cond-expand feature; -D NDEBUG drops debug\n"
      "  -A, --append-libdir=DIR      Append a Scheme library search directory\n"
      "  -I, --prepend-libdir=DIR     Prepend a Scheme library search directory\n"
      "  -P, --stack-pages=N          Root stack size in pages of 64K 8-byte words (default 128)\n"
@@ -784,7 +888,7 @@ int main(int argc, char **argv)
      "\n"
      "'--' ends options processing. FILE is an R7RS Scheme program"
 );
-  while ((opt = egetopt(argc, argv, "cSnvhVt:T:o:O:I:A:P:M:K:-:")) != EOF) {
+  while ((opt = egetopt(argc, argv, "cSnvhVt:T:o:O:D:I:A:P:M:K:-:")) != EOF) {
     switch (opt) {
       case 'c': conly = 1; break;
       case 'S': marvonly = 1; break;
@@ -797,9 +901,10 @@ int main(int argc, char **argv)
       case 'M': mdir = eoptarg; break;
       case 'K': splitfuncs = eoptarg; break;
       case 'O': optlevel = opt_level("-O", eoptarg); break;
-      case 'T': add_dir("-T", targdirs, &ntargdirs, eoptarg); break;
-      case 'I': add_dir("-I", prelibs, &nprelibs, eoptarg); break;
-      case 'A': add_dir("-A", postlibs, &npostlibs, eoptarg); break;
+      case 'D': add_arg("-D", defines, &ndefines, check_define(eoptarg)); break;
+      case 'T': add_arg("-T", targdirs, &ntargdirs, eoptarg); break;
+      case 'I': add_arg("-I", prelibs, &nprelibs, eoptarg); break;
+      case 'A': add_arg("-A", postlibs, &npostlibs, eoptarg); break;
       case 'P': stackpages = page_count("-P", eoptarg); break;
       case '-': {
         /* long_opt takes the name, with a trailing = where a value follows,
@@ -811,12 +916,14 @@ int main(int argc, char **argv)
         else if (long_opt("dry-run")) dryrun = 1;
         else if (long_opt("help")) { skhelp(); return 0; }
         else if (long_opt("version")) { resolve_home(argv[0], 0); version(); return 0; }
-        else if (long_opt("target-dir=")) add_dir(elongopt, targdirs, &ntargdirs, eoptarg);
+        else if (long_opt("target-dir=")) add_arg(elongopt, targdirs, &ntargdirs, eoptarg);
         else if (long_opt("target=")) targdes = eoptarg;
         else if (long_opt("output=")) output = eoptarg;
         else if (long_opt("optimize=")) optlevel = opt_level(elongopt, eoptarg);
-        else if (long_opt("prepend-libdir=")) add_dir(elongopt, prelibs, &nprelibs, eoptarg);
-        else if (long_opt("append-libdir=")) add_dir(elongopt, postlibs, &npostlibs, eoptarg);
+        else if (long_opt("define="))
+          add_arg(elongopt, defines, &ndefines, check_define(eoptarg));
+        else if (long_opt("prepend-libdir=")) add_arg(elongopt, prelibs, &nprelibs, eoptarg);
+        else if (long_opt("append-libdir=")) add_arg(elongopt, postlibs, &npostlibs, eoptarg);
         else if (long_opt("stack-pages="))
           stackpages = page_count(elongopt, eoptarg);
         else if (long_opt("split-funcs=")) splitfuncs = eoptarg;
@@ -836,10 +943,12 @@ int main(int argc, char **argv)
   if (conly && marvonly) eusage("-c and -S ask for different outputs");
   if (mdir != NULL && (conly || marvonly))
     eusage("-M cannot be combined with -c or -S");
-  if (mdir != NULL && output == NULL)
-    eusage("-M needs -o to name the executable");
-  if (!conly && !marvonly && output == NULL)
-    eusage("-o is required unless -c or -S is given");
+  /* NDEBUG is the one -D name that reaches the backend as well, because it
+     is the one that says something about the C: without `debug' the Scheme
+     half compiles its assumptions away, and -D NDEBUG asks the target
+     compiler to do the same with the runtime's own asserts. */
+  for (i = 0; i < ndefines; i++)
+    if (strcmp(defines[i], "NDEBUG") == 0) ndebug = 1;
   if (!file_readable(input)) {
     fprintf(stderr, "skomp: cannot read %s\n", input);
     return 1;
@@ -908,6 +1017,14 @@ int main(int argc, char **argv)
     }
   }
 
+  /* ---- the executable's name, when the caller gave none.  -c and -S name
+     their own products further down, each beside the input as well. */
+  if (!conly && !marvonly && output == NULL) {
+    if (!derive_exe(exe, sizeof(exe), input, mvt)) return 1;
+    output = exe;
+    if (g_verbose) fprintf(stderr, "skomp: output is %s\n", output);
+  }
+
   /* ---- the two checks marv cannot make for itself */
   if (mdir != NULL) {
 #ifndef __WCPL__
@@ -931,25 +1048,8 @@ int main(int argc, char **argv)
         return 1;
       }
       strcpy(mvs, output);
-    } else {
-      char dir[MAXPATH], base[MAXPATH];
-      const char *b;
-      size_t n;
-      path_dir(dir, sizeof(dir), input);
-      b = path_base(input);
-      n = strlen(b);
-      if (n > 4 && strcmp(b + (n - 4), ".scm") == 0) n -= 4;
-      if (n + 5 > sizeof(base)) {
-        fprintf(stderr, "skomp: input name is too long\n");
-        return 1;
-      }
-      memcpy(base, b, n);
-      base[n] = 0;
-      strcat(base, ".mvs");
-      if (!path_join(mvs, sizeof(mvs), dir, base)) {
-        fprintf(stderr, "skomp: output path is too long\n");
-        return 1;
-      }
+    } else if (!name_beside(mvs, sizeof(mvs), input, ".mvs")) {
+      return 1;
     }
   } else {
     const char *tmp;
@@ -1101,13 +1201,23 @@ int main(int argc, char **argv)
     char n[8];
     sprintf(n, " %d", optlevel);
     buf_add(&cmd, n);
-  } else if (stackpages != -1) {
+  } else if (stackpages != -1 || ndefines > 0) {
     buf_add(&cmd, " -");
   }
   if (stackpages != -1) {
     char n[32];
     sprintf(n, " %ld", stackpages);
     buf_add(&cmd, n);
+  } else if (ndefines > 0) {
+    buf_add(&cmd, " -");
+  }
+  /* The -D names follow the two slots, in the order they were written.  The
+     driver script applies them to cp-features itself, by reading the
+     parameter: what a name is added to, and what `debug' is taken out of,
+     is then the compiler's own default rather than skomp's idea of it. */
+  for (i = 0; i < ndefines; i++) {
+    buf_add(&cmd, " ");
+    buf_add(&cmd, defines[i]);
   }
   rc = run(&cmd, "skint");
   if (rc != 0) return exit_code(rc);
@@ -1141,6 +1251,7 @@ int main(int argc, char **argv)
     sprintf(n, " -O %d", optlevel);
     buf_add(&cmd, n);
   }
+  if (ndebug) buf_add(&cmd, " -D NDEBUG");
   if (splitfuncs != NULL) {
     buf_add(&cmd, " --split-funcs=");
     buf_add(&cmd, splitfuncs);
@@ -1156,29 +1267,14 @@ int main(int argc, char **argv)
     /* marv would name the object after the module, which lives in the
        temporary directory; name it after the input instead, with the
        extension the target description gives. */
-    char ext[32], dir[MAXPATH], obj[MAXPATH], base[MAXPATH];
-    const char *b;
-    size_t n;
+    char ext[32], obj[MAXPATH];
     if (!mvt_obj_ext(mvt, ext, sizeof(ext))) {
       fprintf(stderr, "skomp: cannot tell the object extension of %s; "
                       "give -o\n", mvt);
       remove(mvs);
       return 1;
     }
-    path_dir(dir, sizeof(dir), input);
-    b = path_base(input);
-    n = strlen(b);
-    if (n > 4 && strcmp(b + (n - 4), ".scm") == 0) n -= 4;
-    if (n + strlen(ext) + 1 > sizeof(base)) {
-      fprintf(stderr, "skomp: input name is too long\n");
-      remove(mvs);
-      return 1;
-    }
-    memcpy(base, b, n);
-    base[n] = 0;
-    strcat(base, ext);
-    if (!path_join(obj, sizeof(obj), dir, base)) {
-      fprintf(stderr, "skomp: output path is too long\n");
+    if (!name_beside(obj, sizeof(obj), input, ext)) {
       remove(mvs);
       return 1;
     }
